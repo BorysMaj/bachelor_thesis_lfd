@@ -1,0 +1,22 @@
+# Virtual environments
+venv*/
+env/
+
+# Python
+__pycache__/
+*.pyc
+
+# Data & Models
+data/demonstrations/
+models/*.pth
+*.motion
+
+# Secrets
+.env
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store

@@ -1,0 +1,5 @@
+social-interaction-cloud
+torch>=2.0.0
+numpy
+redis
+opencv-python
