@@ -9,7 +9,7 @@ RECORD_HZ = 20
 DATA_DIR  = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
 
 def recording_loop(recorder):
-    """Background thread — records at fixed Hz while is_recording=True."""
+    """Background thread - records at fixed Hz while is_recording=True."""
     while recorder.is_recording:
         recorder.record_step()
         time.sleep(recorder.dt)
@@ -65,7 +65,6 @@ def main():
 
             demo = recorder.demos[-1]
             T = demo["actions"].shape[0]
-            print(f"Recorded {T} steps ({T/RECORD_HZ:.1f}s)")
 
             keep = input("Keep this demo? (y/n): ").strip().lower()
             if keep != "y":

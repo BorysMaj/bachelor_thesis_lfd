@@ -66,7 +66,7 @@ class KinestheticDemoRecorder:
         q = np.array(state.q) # Joint angles
         eef_pos = np.array(state.O_T_EE[12:15]) # XYZ from transform matrix
         eef_quat = self.mat2quat(state.O_T_EE) # Orientation
-        gripper = np.array([state.gripper_width, 0.0])
+        gripper = np.array([0.0, 0.0]) # Need to change -------------------------------------------
 
         self.current_demo["obs"]["robot0_joint_pos"].append(q)
         self.current_demo["obs"]["robot0_eef_pos"].append(eef_pos)
@@ -130,7 +130,9 @@ class KinestheticDemoRecorder:
 
 
     def mat2quat(self, pose):
-        return Rotation.from_matrix(pose[:3, :3]).as_quat()  # [x, y, z, w]
+    # Convert to 4x4 numpy matrix 
+        T = np.array(pose).reshape(4, 4, order='F')  # column-major
+        return Rotation.from_matrix(T[:3, :3]).as_quat()  # [x, y, z, w]
 
     def move_to_home(self):
         self.panda.move_to_start()
