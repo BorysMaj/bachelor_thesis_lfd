@@ -1,10 +1,10 @@
 {
     "algo_name": "bc",
     "experiment": {
-        "name": "wave_bc",
+        "name": "wave_bc_rnn",
         "validate": true,
         "logging": {
-            "terminal_output_to_txt": false,
+            "terminal_output_to_txt": true,
             "log_tb": false,
             "log_wandb": false
         },
@@ -27,22 +27,22 @@
         "output_dir": "/home/borys/Desktop/bachalor_thesis_lfd/models/wave",
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
-        "hdf5_normalize_obs": false,
+        "hdf5_normalize_obs": true,
         "hdf5_filter_key": "train",
         "hdf5_validation_filter_key": "valid",
-        "seq_length": 1,
+        "seq_length": 10,
         "pad_seq_length": true,
         "frame_stack": 1,
         "dataset_keys": ["actions", "rewards", "dones"],
         "action_keys": ["actions"],
         "action_config": {
             "actions": {
-                "normalization": null
+                "normalization": "gaussian"
             }
         },
         "cuda": false,
         "batch_size": 32,
-        "num_epochs": 200,
+        "num_epochs": 500,
         "seed": 1
     },
     "algo": {
@@ -56,7 +56,7 @@
                     "scheduler_type": "multistep"
                 },
                 "regularization": {
-                    "L2": 0.0
+                    "L2": 0.0001
                 }
             }
         },
@@ -65,12 +65,24 @@
             "l1_weight": 0.0,
             "cos_weight": 0.0
         },
-        "actor_layer_dims": [256, 256],
+        "actor_layer_dims": [512, 512],
         "rnn": {
-            "enabled": false
+            "enabled": true,
+            "horizon": 10,
+            "hidden_dim": 400,
+            "rnn_type": "LSTM",
+            "num_layers": 2,
+            "open_loop": false,
+            "kwargs": {
+                "bidirectional": false
+            }
         },
         "gmm": {
-            "enabled": false
+            "enabled": true,
+            "num_modes": 5,
+            "min_std": 0.0001,
+            "std_activation": "softplus",
+            "low_noise_eval": true
         },
         "gaussian": {
             "enabled": false
