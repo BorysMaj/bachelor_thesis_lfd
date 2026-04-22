@@ -88,17 +88,17 @@ class KinestheticDemoRecorder:
         self.current_demo["obs"]["robot0_gripper_qpos"].append(gripper_qpos)
         self.current_demo["states"].append(np.concatenate([q, eef_pos, eef_quat, gripper_qpos]))
 
-        """# Action = delta eef from previous step
+        # Action = delta eef from previous step
         if self.prev_eef_pos is not None:
-            delta_pos  = eef_pos - self.prev_eef_pos
-            r_curr = Rotation.from_quat(eef_quat)
-            r_prev = Rotation.from_quat(self.prev_eef_quat)
-            delta_ori = (r_curr * r_prev.inv()).as_euler('xyz')
-            action = np.concatenate([delta_pos, delta_ori, gripper_cmd])  # (7,)
+            delta_pos = eef_pos - self.prev_eef_pos
+            r_curr    = Rotation.from_quat(eef_quat)
+            r_prev    = Rotation.from_quat(self.prev_eef_quat)
+            delta_ori = (r_curr * r_prev.inv()).as_rotvec() # (3,) ,Axis-angle (rotvec): direction = rotation axis, magnitude = angle in radians
+            action = np.concatenate([delta_pos, delta_ori, gripper_cmd]) # (7,)
         else:
-            action = np.zeros(7)"""
+            action = np.zeros(7)
 
-        self.current_demo["actions"].append(q)
+        self.current_demo["actions"].append(action)
         self.prev_eef_pos  = eef_pos
         self.prev_eef_quat = eef_quat
 
@@ -136,26 +136,4 @@ class KinestheticDemoRecorder:
                 dg.create_dataset("states", data=demo["states"])
                 dg.create_dataset("rewards", data=np.zeros(T))
                 dg.create_dataset("dones", data=np.zeros(T))
-                og = dg.create_group("obs")
-                for k, v in demo["obs"].items():
-                    og.create_dataset(k, data=v)
-
-            # train/val split
-            n = len(self.demos)
-            names = [f"demo_{i}" for i in range(n)]
-            split = int(n * 0.8)
-            mg = f.create_group("mask")
-            mg.create_dataset("train", data=np.array(names[:split], dtype="S"))
-            mg.create_dataset("valid", data=np.array(names[split:], dtype="S"))
-
-        print(f"Saved {len(self.demos)} demos to {path}")
-
-
-
-    def mat2quat(self, pose):
-        """Convert column-major 4x4 transform to xyzw quaternion."""
-        T = np.array(pose).reshape(4, 4, order='F')  # column-major
-        return Rotation.from_matrix(T[:3, :3]).as_quat()  # [x, y, z, w]
-
-    def move_to_home(self):
-        self.panda.move_to_start()
+                og = dg.cr
