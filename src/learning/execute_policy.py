@@ -11,7 +11,7 @@ import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
 
 ROBOT_IP = "172.16.0.2"
-POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/extend_retract/bc_rnn/20260421141429/models/model_epoch_150.pth"
+POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/circle/bc/20260422160320/models/model_epoch_500_best_validation_0.22591152861714364.pth"
 #POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/extend_retract/bc/20260421113223/models/model_epoch_500.pth"
 HORIZON = 200
 HZ = 20
@@ -99,4 +99,62 @@ def main():
     input("\nPress Enter to start execution.")
 
     # Running policy
-    print(f"Running policy for {HORIZON} steps at")
+    print(f"Running policy for {HORIZON} steps at {HZ}Hz")
+    print("Press Ctrl+C to stop")
+
+    # Cartesian impedance controller
+    controller   = panda_py.controllers.CartesianImpedance()
+    gripper_ctrl = GripperController(gripper)
+
+    try:
+        with panda.create_context(frequency=HZ, max_runtime=HORIZON / HZ) as ctx:
+            panda.start_controller(controller)
+
+            step = 0
+            while ctx.ok():
+
+                state = panda.get_state()
+                obs, current_T = get_obs(state)
+
+                # Policy inference
+                raw_action = policy(obs) 
+
+                raw_action = np.array(raw_action).flatten()
+
+                # Integrate delta to absolute target
+                target_pos, target_quat, gripper_cmd = integrate_action(
+                    current_T, raw_action, ACTION_SCALE
+                )
+
+                """# forward kinematics to get target eef pose
+                target_T = panda_py.fk(raw_action.reshape(7, 1))
+                target_pos = target_T[:3, 3]
+                target_quat = Rotation.from_matrix(target_T[:3, :3]).as_quat()"""
+
+                controller.set_control(
+                    position=target_pos.reshape(3, 1),
+                    orientation=target_quat.reshape(4, 1)
+                )
+
+                gripper_cmd = 1.0  # always open for extend/retract
+                gripper_ctrl.update(gripper_cmd)
+
+                # Log
+                if step % 20 == 0:
+                    print(
+                        f"[{step}] pos={obs['robot0_eef_pos'].round(3)},\n target_pos {target_pos}\n, raw_action {raw_action}\n"
+                        f"delta pos={raw_action[:3].round(3)}  gripper={'open' if gripper_cmd > 0 else 'close'}"
+                    )
+                step += 1
+ 
+    except KeyboardInterrupt:
+        print("Stopped")
+ 
+    finally:
+        print("\nGoing home.")
+        panda.move_to_start()
+        print("Done")
+ 
+ 
+if __name__ == "__main__":
+    main()
