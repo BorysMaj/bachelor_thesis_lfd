@@ -23,8 +23,8 @@
         }
     },
     "train": {
-        "data": "/home/borys/Desktop/bachalor_thesis_lfd/data/circle/demos.hdf5",
-        "output_dir": "/home/borys/Desktop/bachalor_thesis_lfd/models/cirlce",
+        "data": "/home/borys/Desktop/bachalor_thesis_lfd/data/wave/demos.hdf5",
+        "output_dir": "/home/borys/Desktop/bachalor_thesis_lfd/models/wave",
         "num_data_workers": 0,
         "hdf5_cache_mode": "all",
         "hdf5_normalize_obs": true,

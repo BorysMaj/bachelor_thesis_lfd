@@ -11,12 +11,12 @@ import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
 
 ROBOT_IP = "172.16.0.2"
-POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/circle/bc/20260422160320/models/model_epoch_500_best_validation_0.22591152861714364.pth"
-#POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/extend_retract/bc/20260421113223/models/model_epoch_500.pth"
+#POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/wave/bc/20260423122021/models/model_epoch_500.pth"
+POLICY_PATH = "/home/borys/Desktop/bachalor_thesis_lfd/models/wave/bc_rnn/20260423122141/models/model_epoch_355_best_validation_114923633.6.pth"
 HORIZON = 200
 HZ = 20
 DT = 1.0 / HZ
-ACTION_SCALE = 0.03  # Scaling for safety
+ACTION_SCALE = 1.0  # Scaling for safety
 
 GRIPPER_MAX_WIDTH = 0.08   # Hand fully open
 GRIPPER_SPEED     = 0.05   # m/s
@@ -35,7 +35,6 @@ def get_obs(state):
         "robot0_eef_pos": eef_pos.astype(np.float32),
         "robot0_eef_quat": eef_quat.astype(np.float32),
         "robot0_joint_pos": np.array(state.q,  dtype=np.float32),
-        "robot0_joint_vel": np.array(state.dq, dtype=np.float32),
         "robot0_gripper_qpos": gripper_qpos.astype(np.float32),
     }
     return obs, T

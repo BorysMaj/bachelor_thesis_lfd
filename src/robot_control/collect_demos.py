@@ -64,6 +64,7 @@ def main():
             recorder.disable_teaching_mode()
 
             demo = recorder.demos[-1]
+            print(demo["obs"]["robot0_gripper_qpos"][-1])
             T = demo["actions"].shape[0]
 
             keep = input("Keep this demo? (y/n): ").strip().lower()
