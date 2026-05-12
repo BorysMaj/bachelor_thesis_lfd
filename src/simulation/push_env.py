@@ -42,6 +42,9 @@ class PushTask(ManipulationEnv):
         
         goal_pos=(0.15, 0.15, 0.82), # fixed goal in world frame
         goal_threshold=0.05, # success radius (m)
+        use_camera_obs=False,
+        use_object_obs=True,
+        reward_shaping=False,
         **kwargs,
     ):
         self.goal_pos = np.array(goal_pos)
@@ -86,7 +89,6 @@ class PushTask(ManipulationEnv):
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=self.box,
         )
-        self.model.place_objects_in_grid(placement_sampler)
 
 
     # Reset — randomise box spawn each episode
@@ -99,6 +101,8 @@ class PushTask(ManipulationEnv):
     # Reward
 
     def reward(self, action=None):
+        print("important_sites:", self.robots[0].important_sites)
+        print("eef_site_id:", self.robots[0].eef_site_id)
         box_pos   = self.sim.data.body_xpos[self.box_body_id]
         dist      = np.linalg.norm(box_pos[:2] - self.goal_pos[:2])  # XY only
 
@@ -106,7 +110,16 @@ class PushTask(ManipulationEnv):
         r_dist    = -dist
 
         # Bonus: EEF near box (encourages making contact)
-        eef_pos   = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        try:
+            sites = self.robots[0].important_sites
+            site_name = sites.get("eef", None) or list(sites.values())[0]
+            eef_site_id = self.sim.model.site_name2id(site_name)
+            eef_pos = np.array(self.sim.data.site_xpos[eef_site_id])
+        except Exception:
+            # Fallback: use EEF body position
+            eef_pos = np.array(self.sim.data.body_xpos[
+                self.sim.model.body_name2id(self.robots[0].robot_model.eef_name)
+            ])
         r_contact = -np.linalg.norm(eef_pos - box_pos) * 0.3
 
         # Sparse success bonus
@@ -131,11 +144,15 @@ class PushTask(ManipulationEnv):
         # Box position
         @sensor(modality="object")
         def box_pos(obs_cache):
+            if self.box_body_id is None:
+                return np.zeros(3)
             return np.array(self.sim.data.body_xpos[self.box_body_id])
 
         # Vector from box to goal (helps policy know which direction to push)
         @sensor(modality="object")
         def box_to_goal(obs_cache):
+            if self.box_body_id is None:
+                return self.goal_pos.copy()
             b = np.array(self.sim.data.body_xpos[self.box_body_id])
             return self.goal_pos - b
 
