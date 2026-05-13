@@ -9,7 +9,6 @@ import robosuite as suite
 from robosuite.controllers import load_composite_controller_config
 from push_env import PushTask  # registers via @register_env
 
-# Use robosuite 1.5+ composite controller loader
 controller_config = load_composite_controller_config(robot="Panda")
 
 env = suite.make(
@@ -18,7 +17,7 @@ env = suite.make(
     controller_configs=controller_config,
     has_renderer=True,
     render_camera="frontview",
-    has_offscreen_renderer=False,
+    has_offscreen_renderer=True,
     use_object_obs=True,
     use_camera_obs=False,
     reward_shaping=True,
@@ -33,7 +32,7 @@ print("box_to_goal:", obs.get("box_to_goal", "not found"))
 low, high = env.action_spec
 
 for step in range(300):
-    action = np.random.uniform(low, high) * 0.05   # small random actions
+    action = np.random.uniform(low,high) * 0.05   # small random actions
     obs, reward, done, info = env.step(action)
     env.render()
 

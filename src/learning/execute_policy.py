@@ -21,7 +21,11 @@ ACTION_SCALE = 1.0  # Scaling for safety
 GRIPPER_MAX_WIDTH = 0.08   # Hand fully open
 GRIPPER_SPEED     = 0.05   # m/s
 GRIPPER_FORCE     = 20.0   # N
-GRIPPER_THRESHOLD = 0.0 
+GRIPPER_THRESHOLD = 0.0
+
+# Safety: abort if any single delta exceeds this (metres / rad per step)
+MAX_DELTA_POS = 0.05   # 5 cm per step max
+MAX_DELTA_ROT = 0.30   # ~17 deg per step max
 
 
 def get_obs(state):
@@ -32,9 +36,8 @@ def get_obs(state):
     gripper_qpos = np.zeros(2)
 
     obs = {
-        "robot0_eef_pos": eef_pos.astype(np.float32),
-        "robot0_eef_quat": eef_quat.astype(np.float32),
-        "robot0_joint_pos": np.array(state.q,  dtype=np.float32),
+        "robot0_eef_pos":      eef_pos.astype(np.float32),
+        "robot0_eef_quat":     eef_quat.astype(np.float32),
         "robot0_gripper_qpos": gripper_qpos.astype(np.float32),
     }
     return obs, T
@@ -77,13 +80,20 @@ def main():
     # Load policy
     print("Loading policy.")
     device = TorchUtils.get_torch_device(try_to_use_cuda=False)
-    policy, _ = FileUtils.policy_from_checkpoint(
+    policy, ckpt_dict = FileUtils.policy_from_checkpoint(
         ckpt_path=POLICY_PATH,
         device=device,
         verbose=True
     )
     policy.start_episode()
     print("Policy loaded")
+
+    # Print obs keys the checkpoint was trained on — helps diagnose mismatches
+    obs_norm = ckpt_dict.get("obs_normalization_stats", {})
+    if obs_norm:
+        print("\nCheckpoint obs keys (trained on):", list(obs_norm.keys()))
+    else:
+        print("\n[WARNING] No obs_normalization_stats in checkpoint — cannot verify obs keys.")
 
     # Connect
     print(f"\nConnecting to Franka at {ROBOT_IP}")
@@ -119,6 +129,16 @@ def main():
                 raw_action = policy(obs) 
 
                 raw_action = np.array(raw_action).flatten()
+
+                # Safety check — abort if action is unreasonably large
+                if np.any(np.abs(raw_action[:3]) > MAX_DELTA_POS):
+                    print(f"\n[SAFETY ABORT] delta_pos too large: {raw_action[:3].round(4)}")
+                    print("Policy is outputting garbage actions — check demo data and re-train.")
+                    break
+                if np.any(np.abs(raw_action[3:6]) > MAX_DELTA_ROT):
+                    print(f"\n[SAFETY ABORT] delta_rot too large: {raw_action[3:6].round(4)}")
+                    print("Policy is outputting garbage actions — check demo data and re-train.")
+                    break
 
                 # Integrate delta to absolute target
                 target_pos, target_quat, gripper_cmd = integrate_action(
