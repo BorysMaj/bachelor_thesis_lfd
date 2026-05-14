@@ -52,10 +52,10 @@ class KinestheticDemoRecorder:
     def start_recording(self):
         self.current_demo = {
             "obs": {
-                "robot0_joint_pos":    [], # 7 joint angles
-                "robot0_eef_pos":      [], # XYZ of hand
-                "robot0_eef_quat":     [], # Orientation of hand
-                "robot0_gripper_qpos": [],  # [left_finger, right_finger] each = width/2
+                "robot0_joint_pos": [], # 7 joint angles
+                "robot0_eef_pos": [], # XYZ of hand
+                "robot0_eef_quat": [], # Orientation of hand
+                "robot0_gripper_qpos": [], # [left_finger, right_finger] each = width/2
             },
             "actions": [],
             "states":  [],
@@ -65,27 +65,45 @@ class KinestheticDemoRecorder:
         self.is_recording  = True
         print("Recording started")
 
+    def start_recording_reach(self, target_pos):
+        """Like start_recording but also stores target_pos and eef_to_target obs."""
+        self._reach_target = np.array(target_pos, dtype=np.float32)
+        self.current_demo = {
+            "obs": {
+                "robot0_joint_pos": [], # 7 joint angles
+                "robot0_eef_pos": [], # XYZ of hand
+                "robot0_eef_quat": [], # Orientation of hand
+                "robot0_gripper_qpos": [], # [left_finger, right_finger] each = width/2
+                "target_pos": [], # Target to which eef has to move to
+                "eef_to_target": [], # Distance between eef and target
+            },
+            "actions": [],
+            "states":  [],
+        }
+        self.prev_eef_pos  = None
+        self.prev_eef_quat = None
+        self.is_recording  = True
+        print(f"Reach recording started,  target={self._reach_target.round(3)}")
+
+    def read_robot_state(self):
+        """Read raw state from robot, return (q, eef_pos, eef_quat, gripper_qpos, gripper_cmd)."""
+        state = self.panda.get_state()
+        q = np.array(state.q)
+        T = np.array(state.O_T_EE).reshape(4, 4, order='F')
+        eef_pos  = T[:3, 3]
+        eef_quat = self.mat2quat(state.O_T_EE)
+        gripper_state = self.gripper.read_once()
+        width = gripper_state.width
+        gripper_qpos = np.array([width / 2, width / 2])
+        gripper_cmd  = np.array([(width / GRIPPER_MAX_WIDTH) * 2.0 - 1.0])
+        return q, eef_pos, eef_quat, gripper_qpos, gripper_cmd
+
     def record_step(self):
         """Read one state from the robot and store it."""
         if not self.is_recording:
             return
 
-        state = self.panda.get_state()
-
-        # Arm observations
-        q = np.array(state.q) # Joint angles
-        T = np.array(state.O_T_EE).reshape(4, 4, order='F')
-        eef_pos = T[:3, 3]
-        eef_quat = self.mat2quat(state.O_T_EE) # Orientation
-
-        # Gripper observation
-        # GripperState with total gap
-        gripper_state = self.gripper.read_once()
-        width = gripper_state.width # total width in metres
-        gripper_qpos = np.array([width / 2, width / 2]) # width per-finger
-
-        # Gripper, normalise width to [-1, +1]
-        gripper_cmd = np.array([(width / GRIPPER_MAX_WIDTH) * 2.0 - 1.0])
+        q, eef_pos, eef_quat, gripper_qpos, gripper_cmd = self.read_robot_state()
 
         self.current_demo["obs"]["robot0_joint_pos"].append(q)
         self.current_demo["obs"]["robot0_eef_pos"].append(eef_pos)
@@ -93,7 +111,40 @@ class KinestheticDemoRecorder:
         self.current_demo["obs"]["robot0_gripper_qpos"].append(gripper_qpos)
         self.current_demo["states"].append(np.concatenate([q, eef_pos, eef_quat, gripper_qpos]))
 
-        # Action = delta eef from previous step
+        if self.prev_eef_pos is not None:
+            delta_pos = eef_pos - self.prev_eef_pos
+            r_curr = Rotation.from_quat(eef_quat)
+            r_prev = Rotation.from_quat(self.prev_eef_quat)
+            delta_ori = (r_curr * r_prev.inv()).as_rotvec()
+            action = np.concatenate([delta_pos, delta_ori, gripper_cmd])
+        else:
+            action = np.zeros(7)
+
+        self.current_demo["actions"].append(action)
+        self.prev_eef_pos = eef_pos
+        self.prev_eef_quat = eef_quat
+
+    def record_step_reach(self):
+        """
+        Like record_step but also stores target_pos and eef_to_target.
+        Returns current distance to target so the caller can detect success.
+        """
+        if not self.is_recording:
+            return 999.0
+
+        q, eef_pos, eef_quat, gripper_qpos, gripper_cmd = self._read_robot_state()
+
+        eef_to_target = self._reach_target - eef_pos
+        dist = float(np.linalg.norm(eef_to_target))
+
+        self.current_demo["obs"]["robot0_joint_pos"].append(q)
+        self.current_demo["obs"]["robot0_eef_pos"].append(eef_pos)
+        self.current_demo["obs"]["robot0_eef_quat"].append(eef_quat)
+        self.current_demo["obs"]["robot0_gripper_qpos"].append(gripper_qpos)
+        self.current_demo["obs"]["target_pos"].append(self._reach_target.copy())
+        self.current_demo["obs"]["eef_to_target"].append(eef_to_target.astype(np.float32))
+        self.current_demo["states"].append(np.concatenate([q, eef_pos, eef_quat, gripper_qpos]))
+
         if self.prev_eef_pos is not None:
             delta_pos = eef_pos - self.prev_eef_pos
             r_curr    = Rotation.from_quat(eef_quat)
@@ -106,6 +157,8 @@ class KinestheticDemoRecorder:
         self.current_demo["actions"].append(action)
         self.prev_eef_pos  = eef_pos
         self.prev_eef_quat = eef_quat
+
+        return dist
 
         
     def stop_recording(self):
