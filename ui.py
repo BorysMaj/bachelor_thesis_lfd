@@ -17,25 +17,27 @@ from pathlib import Path
 _log_queue: queue.Queue = queue.Queue()
 
 # Config
-ROBOT_IP      = "172.16.0.2"
-DEMOS_DIR     = Path("data").expanduser()
-MODELS_DIR    = Path("models").expanduser()
+ROBOT_IP = "172.16.0.2"
+DEMOS_DIR = Path("data").expanduser()
+MODELS_DIR = Path("models").expanduser()
+CONFIG_DIR = Path("configs").expanduser()
 RECORDER_PATH = Path(__file__).parent / "src/robot_control/demo_recorder.py"
 EXECUTE_PATH  = Path(__file__).parent / "src/learning/execute_policy.py"
 
 DEMOS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Session state defaults
 def init_state():
     defaults = {
         "robot_connected": False,
-        "recording":       False,
-        "training":        False,
-        "executing":       False,
-        "current_task":    None,
-        "log":             [],
-        "recorder":        None,
+        "recording": False,
+        "training": False,
+        "executing": False,
+        "current_task": None,
+        "log": [],
+        "recorder": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -276,12 +278,14 @@ def main():
             ):
                 dataset_path = DEMOS_DIR / st.session_state.current_task / "demos.hdf5"
                 output_dir   = MODELS_DIR / st.session_state.current_task
+                config_path = CONFIG_DIR / st.session_state.current_task / "bc_rnn.json"
 
                 def train():
                     st.session_state.training = True
                     log(f"Training started - {n_epochs} epochs")
                     cmd = [
-                        "python", "-u", "-m", "robomimic.scripts.train",
+                        "python", "-m", "robomimic.scripts.train",
+                        "--config", str(config_path),
                         "--dataset", str(dataset_path),
                         "--output_dir", str(output_dir),
                     ]
