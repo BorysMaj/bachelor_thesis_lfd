@@ -136,24 +136,22 @@ def find_latest_demo(task_name: str):
     return Path(max(matches, key=os.path.getmtime))
 
 
-def launch_sim_collection(task_name: str, env_name: str, num_demos: int):
+def launch_sim_collection(task_name: str, env_name: str):
     """
-    Open a new terminal window running our custom collection script.
-    Uses collect_sim_demos.py which auto-imports all custom envs and has
-    better SpaceMouse button bindings (right=save, left=discard).
+    Open a new terminal window running robosuite collection script.
+    Uses collect_human_demonstrations.py whith custom and already avaiable envs.
     Returns the Popen object for the terminal.
     """
     output_dir = str((DEMOS_DIR / task_name).resolve())
-    script     = str(COLLECT_SCRIPT.resolve())
+    script = str(COLLECT_SCRIPT.resolve())
     cmd_inner = (
         f"cd {Path(__file__).parent.resolve()} && "
-        f"python {script} "
+        f"sudo /home/borys/miniconda3/envs/franka/bin/python -m robosuite.scripts.collect_human_demonstrations "
         f"--environment {env_name} "
         f"--robots Panda "
-        f"--directory {output_dir}/ "
         f"--device spacemouse "
-        f"--num-demos {num_demos}; "
-        f"echo ''; echo 'Collection done — press Enter to close'; read"
+        f"--directory {output_dir}; "
+        f"echo ''; echo 'Collection done - press Enter to close'; read"
     )
     # Try gnome-terminal first, fall back to xterm
     try:
@@ -178,7 +176,7 @@ def process_sim_demos(demo_path: Path):
     obs_path = demo_path.parent / "obs.hdf5"
 
     log(f"Processing: {demo_path.name}")
-    log("Step 1/2 — dataset_states_to_obs …")
+    log("Step 1/2 - dataset_states_to_obs")
 
     cmd1 = [
         "python", "-m", "robomimic.scripts.dataset_states_to_obs",
@@ -194,7 +192,7 @@ def process_sim_demos(demo_path: Path):
         return
 
     log(f"Saved obs.hdf5 → {obs_path}")
-    log("Step 2/2 — split_train_val …")
+    log("Step 2/2 - split_train_val …")
 
     cmd2 = [
         "python", "-m", "robomimic.scripts.split_train_val",
@@ -255,7 +253,7 @@ def main():
     # Sidebar 
     with st.sidebar:
 
-        # Mode toggle — top of sidebar, always visible
+        # Mode toggle - top of sidebar, always visible
         st.header("Mode")
         mode = st.radio(
             "Environment",
@@ -270,9 +268,9 @@ def main():
             st.rerun()
 
         if st.session_state.mode == "Real Robot":
-            st.markdown("**Real Robot** — kinesthetic teaching on Franka")
+            st.markdown("**Real Robot** - kinesthetic teaching on Franka")
         else:
-            st.markdown("**Simulation** — robosuite SpaceMouse collection")
+            st.markdown("**Simulation** - robosuite SpaceMouse collection")
 
         st.divider()
 
@@ -359,15 +357,14 @@ def main():
             st.warning("Select or create a task in the sidebar first.")
         else:
             st.markdown(f"**Task:** `{st.session_state.current_task}`  |  "
-                        f"**Demos so far:** {get_demo_count(st.session_state.current_task)}")
+                        f"**Demos recorded:** {get_demo_count(st.session_state.current_task)}")
 
             if st.session_state.mode == "Real Robot":
                 # Real robot recording
                 st.info(
-                    "1. Pre-position the arm at the start of the motion\n"
-                    "2. Click **Start Recording**\n"
-                    "3. Perform the demonstration\n"
-                    "4. Click **Stop Recording**"
+                    "1. Click **Start Recording**\n"
+                    "2. Perform the demonstration\n"
+                    "3. Click **Stop Recording**"
                 )
 
                 col1, col2 = st.columns(2)
@@ -380,11 +377,11 @@ def main():
                         try:
                             from src.robot_control.demo_recorder import KinestheticDemoRecorder
                             rec = KinestheticDemoRecorder(robot_ip=ROBOT_IP)
-                            rec.panda   = st.session_state.panda
+                            rec.panda = st.session_state.panda
                             rec.gripper = st.session_state.gripper
                             rec.enable_teaching_mode()
                             rec.start_recording()
-                            st.session_state.recorder  = rec
+                            st.session_state.recorder = rec
                             st.session_state.recording = True
                             log("Recording started")
 
@@ -411,7 +408,7 @@ def main():
                             T = demo["actions"].shape[0]
                             save_path = DEMOS_DIR / st.session_state.current_task / "demos.hdf5"
                             rec.save(str(save_path), task_name=st.session_state.current_task)
-                            log(f"Saved demo — {T} steps ({T/20:.1f}s)")
+                            log(f"Saved demo - {T} steps ({T/20:.1f}s)")
                             st.session_state.recorder = None
                         except Exception as e:
                             log(f"Stop recording error: {e}")
@@ -430,15 +427,6 @@ def main():
                 with col_info:
                     st.subheader("Collect in Simulation")
 
-                    # Env name badge
-                    if env_name == "Playground":
-                        st.warning(
-                            f"⚠ No environment mapping for **{task_name}** — "
-                            f"will launch **Playground**. "
-                            f"Add it to `TASK_TO_ENV` in ui.py when ready."
-                        )
-                    else:
-                        st.success(f"Environment: **{env_name}**")
 
                     # Controls reminder
                     with st.expander("SpaceMouse controls", expanded=False):
@@ -446,16 +434,9 @@ def main():
                             "- **Move / tilt** → move end-effector\n"
                             "- **Left button** → hold to close gripper\n"
                             "- **Right button** → reset the demo\n"
-                            "- **CTRL + Q** in viewer → quit"
+                            "- **CTRL + Q** in viewer → quit\n"
+                            "- **CTRL + C** in terminal (after collecting all demos) → quit"
                         )
-
-                    st.divider()
-
-                    # Launch collection
-                    num_demos = st.number_input(
-                        "Number of demos to collect", value=50, min_value=1, step=10,
-                        key="sim_num_demos",
-                    )
 
                     if st.button(
                         "▶ Launch Simulation Collection",
@@ -465,16 +446,16 @@ def main():
                     ):
                         (DEMOS_DIR / task_name).mkdir(parents=True, exist_ok=True)
                         try:
-                            launch_sim_collection(task_name, env_name, int(num_demos))
+                            launch_sim_collection(task_name, env_name)
                             st.session_state.sim_collecting = True
-                            log(f"Launched sim collection — env={env_name}, demos={num_demos}")
-                            log(f"Output will appear in  data/{task_name}/<timestamp>/demo.hdf5")
+                            log(f"Launched sim collection - env={env_name}")
+                            log(f"Output will appear in data/{task_name}/TEMP/demo.hdf5")
                         except Exception as e:
                             log(f"Failed to launch terminal: {e}")
 
                     if st.session_state.sim_collecting:
                         st.info(
-                            "🟢 Collection terminal is open.\n\n"
+                            "🟢 Collection terminal and simulation window is open.\n\n"
                             "When you're done, come back here and click **Mark Collection Done**."
                         )
                         if st.button("✓ Mark Collection Done", key="btn_done_sim"):
@@ -485,12 +466,12 @@ def main():
                                 st.session_state.sim_last_demo_path = str(latest)
                                 log(f"Detected demo file: {latest}")
                             else:
-                                log("No demo.hdf5 found yet — check the data folder.")
+                                log("No demo.hdf5 found yet - check the data folder.")
                             st.rerun()
 
                     st.divider()
 
-                    # ── Post-processing ───────────────────────────────────────
+                    # Post-processing
                     st.subheader("Post-process Demos")
 
                     # Auto-detect or show current
@@ -512,17 +493,17 @@ def main():
                         key="btn_process_sim",
                     ):
                         run_in_thread(process_sim_demos, latest_demo)
-                        log("Post-processing started…")
+                        log("Post-processing started")
                         st.rerun()
 
                     if st.session_state.sim_processing:
-                        st.info("⏳ Post-processing in progress — check the Log tab.")
+                        st.info("Post-processing in progress - check the Log tab.")
 
                 with col_preview:
                     st.subheader("Environment Preview")
                     sim_preview(task_name)
 
-    # ── TRAIN tab ─────────────────────────────────────────────────────────────
+    # TRAIN tab
     with tab_train:
         st.header("Train Policy")
 
@@ -530,7 +511,7 @@ def main():
             st.warning("Select a task first.")
         else:
             n_demos = get_demo_count(st.session_state.current_task)
-            st.markdown(f"**Task:** `{st.session_state.current_task}` — {n_demos} demos")
+            st.markdown(f"**Task:** `{st.session_state.current_task}` - {n_demos} demos")
 
             if n_demos < 5:
                 st.warning(f"Only {n_demos} demos. Recommend at least 20 before training.")
@@ -553,7 +534,7 @@ def main():
 
                 def train():
                     st.session_state.training = True
-                    log(f"Training started — {n_epochs} epochs")
+                    log(f"Training started - {n_epochs} epochs")
                     cmd = [
                         "python", "-m", "robomimic.scripts.train",
                         "--config", str(config_path),
@@ -589,7 +570,7 @@ def main():
                 for m in models[-5:]:
                     st.text(Path(m).name)
 
-    # ── EXECUTE tab ───────────────────────────────────────────────────────────
+    # EXECUTE tab 
     with tab_execute:
         st.header("Execute Policy")
 
@@ -607,9 +588,9 @@ def main():
 
             col1, col2 = st.columns(2)
             with col1:
-                horizon = st.number_input("Horizon (steps)", value=200, min_value=50, step=50)
+                horizon = st.number_input("Horizon (steps)", value=400, min_value=50, step=50)
             with col2:
-                action_scale = st.slider("Action scale", 0.1, 2.0, 1.0, 0.1)
+                num_demos_ex = st.number_input("Number of demos executed", value=10, min_value=1, step=1)
 
             if st.session_state.mode == "Real Robot":
                 st.warning("⚠ Make sure the workspace is clear before running.")
@@ -650,11 +631,11 @@ def main():
 
             else:
                 # Simulation execution
-                st.info("Run the policy in simulation using the test script.")
-                task_name = st.session_state.current_task or ""
+                if st.button("▶ Execute"):
+
+                    task_name = st.session_state.current_task or ""
                 st.code(
-                    f"cd src/simulation\n"
-                    f"python test_{task_name.lower()}_env.py",
+                    f"python -m robomimic.scripts.run_trained_agent --agent {model_path} --n_rollouts {num_demos_ex} --horizon {horizon} --render",
                     language="bash",
                 )
 
@@ -668,9 +649,9 @@ def main():
                         log("Execution rated: GOOD")
                 with col_bad:
                     if st.button("👎 Failed"):
-                        log("Execution rated: BAD — consider adding more demos")
+                        log("Execution rated: BAD - consider adding more demos")
 
-    # ── LOG tab ───────────────────────────────────────────────────────────────
+    # LOG tab
     with tab_log:
         st.header("Activity Log")
         if st.button("Clear log"):
