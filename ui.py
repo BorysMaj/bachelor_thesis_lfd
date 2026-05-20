@@ -17,43 +17,69 @@ from pathlib import Path
 _log_queue: queue.Queue = queue.Queue()
 
 # Config
-ROBOT_IP = "172.16.0.2"
-DEMOS_DIR = Path("data").expanduser()
-MODELS_DIR = Path("models").expanduser()
-CONFIG_DIR = Path("configs").expanduser()
+ROBOT_IP      = "172.16.0.2"
+DEMOS_DIR     = Path("data")
+MODELS_DIR    = Path("models")
+CONFIG_DIR    = Path("config")
+ASSETS_DIR    = Path(__file__).parent / "assets"
 RECORDER_PATH = Path(__file__).parent / "src/robot_control/demo_recorder.py"
 EXECUTE_PATH  = Path(__file__).parent / "src/learning/execute_policy.py"
+# Use our custom script (auto-imports all custom envs, has better button bindings)
+COLLECT_SCRIPT = Path(__file__).parent / "src/simulation/collect_sim_demos.py"
+
+# Maps UI task names to robosuite env names
+TASK_TO_ENV = {
+    "reach":      "ReachTask",
+    "push":       "PushTask",
+    "lift":       "Lift",
+    "stack":      "Stack",
+    "wave":       "Playground",
+    "playground": "Playground",
+}
 
 DEMOS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Session state defaults
+SIM_PREVIEWS = {
+    "Reach":  ASSETS_DIR / "sim_reach.png",
+    "Push":   ASSETS_DIR / "sim_push.png",
+    "Lift":   ASSETS_DIR / "sim_lift.png",
+    "Stack":  ASSETS_DIR / "sim_stack.png",
+}
+
+# Session state
+
 def init_state():
     defaults = {
-        "robot_connected": False,
-        "recording": False,
-        "training": False,
-        "executing": False,
-        "current_task": None,
-        "log": [],
-        "recorder": None,
+        "robot_connected":     False,
+        "recording":           False,
+        "training":            False,
+        "executing":           False,
+        "current_task":        None,
+        "mode":                "Real Robot",   # Real Robot or Simulation
+        "log":                 [],
+        "recorder":            None,
+        "sim_collecting":      False,   # True while collection terminal is open
+        "sim_last_demo_path":  None,    # path to most recent demo.hdf5
+        "sim_processing":      False,   # True while post-processing runs
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
+# Logging
+
 def log(msg: str):
-    """Log a message."""
+    """Log a message. Call from background threads."""
     timestamp = time.strftime("%H:%M:%S")
     entry = f"[{timestamp}] {msg}"
     try:
-        # Works when called from the main Streamlit thread
         st.session_state.log.append(entry)
         if len(st.session_state.log) > 100:
             st.session_state.log = st.session_state.log[-100:]
     except Exception:
-        # Called from a background thread — queue it for the main thread
         _log_queue.put(entry)
 
 def drain_log_queue():
@@ -69,7 +95,6 @@ def drain_log_queue():
 
 # Helpers
 def get_tasks():
-    """List task names = subdirectories of DEMOS_DIR."""
     if not DEMOS_DIR.exists():
         return []
     return sorted([d.name for d in DEMOS_DIR.iterdir() if d.is_dir()])
@@ -93,7 +118,128 @@ def run_in_thread(fn, *args):
     t = threading.Thread(target=fn, args=args, daemon=True)
     t.start()
 
-# Main UI
+def task_to_env(task_name: str) -> str:
+    """Map a UI task name to its robosuite environment name."""
+    key = task_name.strip().lower()
+    return TASK_TO_ENV.get(key, "Playground")
+
+
+def find_latest_demo(task_name: str):
+    """
+    Return Path to the most recently modified demo.hdf5 inside data/{task_name}/.
+    Returns None if nothing found.
+    """
+    pattern = str(DEMOS_DIR / task_name / "**" / "demo.hdf5")
+    matches = glob.glob(pattern, recursive=True)
+    if not matches:
+        return None
+    return Path(max(matches, key=os.path.getmtime))
+
+
+def launch_sim_collection(task_name: str, env_name: str, num_demos: int):
+    """
+    Open a new terminal window running our custom collection script.
+    Uses collect_sim_demos.py which auto-imports all custom envs and has
+    better SpaceMouse button bindings (right=save, left=discard).
+    Returns the Popen object for the terminal.
+    """
+    output_dir = str((DEMOS_DIR / task_name).resolve())
+    script     = str(COLLECT_SCRIPT.resolve())
+    cmd_inner = (
+        f"cd {Path(__file__).parent.resolve()} && "
+        f"python {script} "
+        f"--environment {env_name} "
+        f"--robots Panda "
+        f"--directory {output_dir}/ "
+        f"--device spacemouse "
+        f"--num-demos {num_demos}; "
+        f"echo ''; echo 'Collection done — press Enter to close'; read"
+    )
+    # Try gnome-terminal first, fall back to xterm
+    try:
+        proc = subprocess.Popen(
+            ["gnome-terminal", "--", "bash", "-c", cmd_inner],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        proc = subprocess.Popen(
+            ["xterm", "-e", f"bash -c '{cmd_inner}'"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    return proc
+
+
+def process_sim_demos(demo_path: Path):
+    """
+    Background thread: run dataset_states_to_obs then split_train_val on demo_path.
+    Updates session state flags and logs progress.
+    """
+    st.session_state.sim_processing = True
+    obs_path = demo_path.parent / "obs.hdf5"
+
+    log(f"Processing: {demo_path.name}")
+    log("Step 1/2 — dataset_states_to_obs …")
+
+    cmd1 = [
+        "python", "-m", "robomimic.scripts.dataset_states_to_obs",
+        "--dataset", str(demo_path),
+        "--output_name", "obs.hdf5",
+        "--done_mode", "0",
+    ]
+    proc1 = subprocess.run(cmd1, capture_output=True, text=True,
+                           cwd=str(Path(__file__).parent))
+    if proc1.returncode != 0:
+        log(f"dataset_states_to_obs failed:\n{proc1.stderr[-500:]}")
+        st.session_state.sim_processing = False
+        return
+
+    log(f"Saved obs.hdf5 → {obs_path}")
+    log("Step 2/2 — split_train_val …")
+
+    cmd2 = [
+        "python", "-m", "robomimic.scripts.split_train_val",
+        "--dataset", str(obs_path),
+        "--ratio", "0.1",
+    ]
+    proc2 = subprocess.run(cmd2, capture_output=True, text=True,
+                           cwd=str(Path(__file__).parent))
+    if proc2.returncode != 0:
+        log(f"split_train_val failed:\n{proc2.stderr[-500:]}")
+    else:
+        log("Train/val split done. Demos are ready for training.")
+
+    st.session_state.sim_processing = False
+
+
+def sim_preview(task_name: str):
+    """Show the simulation screenshot for a task if it exists."""
+    # Match task name
+    key = next((k for k in SIM_PREVIEWS if k.lower() in task_name.lower()), None)
+    path = SIM_PREVIEWS.get(key) if key else None
+
+    if path and path.exists():
+        st.image(str(path), caption=f"{key} - simulation view", use_container_width=True)
+    else:
+        # TEMP
+        st.markdown(
+            """
+            <div style="
+                border: 2px dashed #555;
+                border-radius: 8px;
+                padding: 40px;
+                text-align: center;
+                color: #888;
+                background: #1a1a1a;
+            ">
+                Simulation preview<br>
+                <small>Drop <code>assets/sim_{task}.png</code> to show a screenshot here</small>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+# Main UI 
+
 def main():
     init_state()
     drain_log_queue()
@@ -106,44 +252,68 @@ def main():
 
     st.title("Robot Learning from Demonstration")
 
-    # Sidebar
+    # Sidebar 
     with st.sidebar:
-        st.header("Status")
 
-        # Robot connection
-        robot_color = "🟢" if st.session_state.robot_connected else "🔴"
-        st.markdown(f"{robot_color} Robot: {'Connected' if st.session_state.robot_connected else 'Disconnected'}")
+        # Mode toggle — top of sidebar, always visible
+        st.header("Mode")
+        mode = st.radio(
+            "Environment",
+            ["Real Robot", "Simulation"],
+            index=0 if st.session_state.mode == "Real Robot" else 1,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        if mode != st.session_state.mode:
+            st.session_state.mode = mode
+            log(f"Switched to {mode} mode")
+            st.rerun()
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Connect", disabled=st.session_state.robot_connected):
-                try:
-                    import panda_py
-                    from panda_py import libfranka
-                    st.session_state.panda   = panda_py.Panda(ROBOT_IP)
-                    st.session_state.gripper = libfranka.Gripper(ROBOT_IP)
-                    st.session_state.robot_connected = True
-                    log(f"Connected to Franka at {ROBOT_IP}")
-                except Exception as e:
-                    log(f"Connection failed: {e}")
-        with col2:
-            if st.button("Disconnect", disabled=not st.session_state.robot_connected):
-                st.session_state.robot_connected = False
-                st.session_state.panda   = None
-                st.session_state.gripper = None
-                log("Disconnected")
+        if st.session_state.mode == "Real Robot":
+            st.markdown("**Real Robot** — kinesthetic teaching on Franka")
+        else:
+            st.markdown("**Simulation** — robosuite SpaceMouse collection")
 
         st.divider()
 
+        # Robot connection (only relevant in real robot mode)
+        if st.session_state.mode == "Real Robot":
+            st.header("Connection")
+            robot_color = "🟢" if st.session_state.robot_connected else "🔴"
+            st.markdown(
+                f"{robot_color} {'Connected' if st.session_state.robot_connected else 'Disconnected'}"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Connect", disabled=st.session_state.robot_connected):
+                    try:
+                        import panda_py
+                        from panda_py import libfranka
+                        st.session_state.panda   = panda_py.Panda(ROBOT_IP)
+                        st.session_state.gripper = libfranka.Gripper(ROBOT_IP)
+                        st.session_state.robot_connected = True
+                        log(f"Connected to Franka at {ROBOT_IP}")
+                    except Exception as e:
+                        log(f"Connection failed: {e}")
+            with col2:
+                if st.button("Disconnect", disabled=not st.session_state.robot_connected):
+                    st.session_state.robot_connected = False
+                    st.session_state.panda   = None
+                    st.session_state.gripper = None
+                    log("Disconnected")
+
+            st.divider()
+
         # Mode indicator
         if st.session_state.recording:
-            st.markdown("🔴 **Mode: Recording**")
+            st.markdown("🔴 **Recording**")
         elif st.session_state.training:
-            st.markdown("🔵 **Mode: Training**")
+            st.markdown("🔵 **Training**")
         elif st.session_state.executing:
-            st.markdown("🟡 **Mode: Executing**")
+            st.markdown("🟡 **Executing**")
         else:
-            st.markdown("⚪ **Mode: Idle**")
+            st.markdown("⚪ **Idle**")
 
         st.divider()
 
@@ -176,82 +346,183 @@ def main():
         else:
             st.info("No tasks yet. Create one above.")
 
-    # Main tabs
+    # Main tabs 
     tab_record, tab_train, tab_execute, tab_log = st.tabs(
         ["⏺ Record", "⚙ Train", "▶ Execute", "📋 Log"]
     )
 
-    # RECORD tab
+    # RECORD tab 
     with tab_record:
         st.header("Record Demonstrations")
 
         if not st.session_state.current_task:
             st.warning("Select or create a task in the sidebar first.")
         else:
-            st.markdown(f"**Task:** `{st.session_state.current_task}`")
-            st.markdown(f"**Demos so far:** {get_demo_count(st.session_state.current_task)}")
+            st.markdown(f"**Task:** `{st.session_state.current_task}`  |  "
+                        f"**Demos so far:** {get_demo_count(st.session_state.current_task)}")
 
-            st.info(
-                "1. Pre-position the arm at the start of the motion\n"
-                "2. Click **Start Recording**\n"
-                "3. Perform the demonstration\n"
-                "4. Click **Stop Recording**"
-            )
+            if st.session_state.mode == "Real Robot":
+                # Real robot recording
+                st.info(
+                    "1. Pre-position the arm at the start of the motion\n"
+                    "2. Click **Start Recording**\n"
+                    "3. Perform the demonstration\n"
+                    "4. Click **Stop Recording**"
+                )
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(
-                    "⏺ Start Recording",
-                    disabled=st.session_state.recording or not st.session_state.robot_connected,
-                    type="primary",
-                ):
-                    try:
-                        from src.robot_control.demo_recorder import KinestheticDemoRecorder
-                        rec = KinestheticDemoRecorder(robot_ip=ROBOT_IP)
-                        rec.panda   = st.session_state.panda
-                        rec.gripper = st.session_state.gripper
-                        rec.enable_teaching_mode()
-                        rec.start_recording()
-                        st.session_state.recorder  = rec
-                        st.session_state.recording = True
-                        log("Recording started")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button(
+                        "⏺ Start Recording",
+                        disabled=st.session_state.recording or not st.session_state.robot_connected,
+                        type="primary",
+                    ):
+                        try:
+                            from src.robot_control.demo_recorder import KinestheticDemoRecorder
+                            rec = KinestheticDemoRecorder(robot_ip=ROBOT_IP)
+                            rec.panda   = st.session_state.panda
+                            rec.gripper = st.session_state.gripper
+                            rec.enable_teaching_mode()
+                            rec.start_recording()
+                            st.session_state.recorder  = rec
+                            st.session_state.recording = True
+                            log("Recording started")
 
-                        # Start background polling at 20 Hz
-                        def poll():
-                            while st.session_state.recording:
-                                st.session_state.recorder.record_step()
-                                time.sleep(0.05)
-                        run_in_thread(poll)
-                    except Exception as e:
-                        log(f"Recording error: {e}")
+                            def poll():
+                                while st.session_state.recording:
+                                    st.session_state.recorder.record_step()
+                                    time.sleep(0.05)
+                            run_in_thread(poll)
+                        except Exception as e:
+                            log(f"Recording error: {e}")
 
-            with col2:
-                if st.button(
-                    "■ Stop Recording",
-                    disabled=not st.session_state.recording,
-                    type="secondary",
-                ):
-                    st.session_state.recording = False
-                    time.sleep(0.1)
-                    try:
-                        rec  = st.session_state.recorder
-                        demo = rec.stop_recording()
-                        rec.disable_teaching_mode()
-                        T = demo["actions"].shape[0]
+                with col2:
+                    if st.button(
+                        "■ Stop Recording",
+                        disabled=not st.session_state.recording,
+                        type="secondary",
+                    ):
+                        st.session_state.recording = False
+                        time.sleep(0.1)
+                        try:
+                            rec  = st.session_state.recorder
+                            demo = rec.stop_recording()
+                            rec.disable_teaching_mode()
+                            T = demo["actions"].shape[0]
+                            save_path = DEMOS_DIR / st.session_state.current_task / "demos.hdf5"
+                            rec.save(str(save_path), task_name=st.session_state.current_task)
+                            log(f"Saved demo — {T} steps ({T/20:.1f}s)")
+                            st.session_state.recorder = None
+                        except Exception as e:
+                            log(f"Stop recording error: {e}")
+                        st.rerun()
 
-                        # Save to HDF5
-                        save_path = DEMOS_DIR / st.session_state.current_task / "demos.hdf5"
-                        rec.save(str(save_path), task_name=st.session_state.current_task)
-                        log(f"Saved demo - {T} steps ({T/20:.1f}s) → {save_path}")
-                        st.session_state.recorder = None
-                    except Exception as e:
-                        log(f"Stop recording error: {e}")
-                    st.rerun()
+                if st.session_state.recording:
+                    st.error("🔴 Recording in progress...")
 
-            if st.session_state.recording:
-                st.error("🔴 Recording in progress...")
+            else:
+                # Simulation recording
+                task_name = st.session_state.current_task
+                env_name  = task_to_env(task_name)
 
-    # TRAIN tab
+                col_info, col_preview = st.columns([1, 1])
+
+                with col_info:
+                    st.subheader("Collect in Simulation")
+
+                    # Env name badge
+                    if env_name == "Playground":
+                        st.warning(
+                            f"⚠ No environment mapping for **{task_name}** — "
+                            f"will launch **Playground**. "
+                            f"Add it to `TASK_TO_ENV` in ui.py when ready."
+                        )
+                    else:
+                        st.success(f"Environment: **{env_name}**")
+
+                    # Controls reminder
+                    with st.expander("SpaceMouse controls", expanded=False):
+                        st.markdown(
+                            "- **Move / tilt** → move end-effector\n"
+                            "- **Left button** → hold to close gripper\n"
+                            "- **Right button** → reset the demo\n"
+                            "- **CTRL + Q** in viewer → quit"
+                        )
+
+                    st.divider()
+
+                    # Launch collection
+                    num_demos = st.number_input(
+                        "Number of demos to collect", value=50, min_value=1, step=10,
+                        key="sim_num_demos",
+                    )
+
+                    if st.button(
+                        "▶ Launch Simulation Collection",
+                        type="primary",
+                        disabled=st.session_state.sim_collecting,
+                        key="btn_launch_sim",
+                    ):
+                        (DEMOS_DIR / task_name).mkdir(parents=True, exist_ok=True)
+                        try:
+                            launch_sim_collection(task_name, env_name, int(num_demos))
+                            st.session_state.sim_collecting = True
+                            log(f"Launched sim collection — env={env_name}, demos={num_demos}")
+                            log(f"Output will appear in  data/{task_name}/<timestamp>/demo.hdf5")
+                        except Exception as e:
+                            log(f"Failed to launch terminal: {e}")
+
+                    if st.session_state.sim_collecting:
+                        st.info(
+                            "🟢 Collection terminal is open.\n\n"
+                            "When you're done, come back here and click **Mark Collection Done**."
+                        )
+                        if st.button("✓ Mark Collection Done", key="btn_done_sim"):
+                            st.session_state.sim_collecting = False
+                            # Auto-detect the latest demo.hdf5
+                            latest = find_latest_demo(task_name)
+                            if latest:
+                                st.session_state.sim_last_demo_path = str(latest)
+                                log(f"Detected demo file: {latest}")
+                            else:
+                                log("No demo.hdf5 found yet — check the data folder.")
+                            st.rerun()
+
+                    st.divider()
+
+                    # ── Post-processing ───────────────────────────────────────
+                    st.subheader("Post-process Demos")
+
+                    # Auto-detect or show current
+                    latest_demo = find_latest_demo(task_name)
+                    if latest_demo:
+                        rel = latest_demo.relative_to(Path(__file__).parent) \
+                              if latest_demo.is_absolute() else latest_demo
+                        st.markdown(f"**Found:** `{latest_demo}`")
+                        obs_ready = (latest_demo.parent / "obs.hdf5").exists()
+                        if obs_ready:
+                            st.success("obs.hdf5 already exists for this demo.")
+                    else:
+                        st.warning("No demo.hdf5 found in this task's data folder yet.")
+
+                    if st.button(
+                        "⚙ Process Demos  (states → obs + train/val split)",
+                        type="secondary",
+                        disabled=st.session_state.sim_processing or latest_demo is None,
+                        key="btn_process_sim",
+                    ):
+                        run_in_thread(process_sim_demos, latest_demo)
+                        log("Post-processing started…")
+                        st.rerun()
+
+                    if st.session_state.sim_processing:
+                        st.info("⏳ Post-processing in progress — check the Log tab.")
+
+                with col_preview:
+                    st.subheader("Environment Preview")
+                    sim_preview(task_name)
+
+    # ── TRAIN tab ─────────────────────────────────────────────────────────────
     with tab_train:
         st.header("Train Policy")
 
@@ -259,7 +530,7 @@ def main():
             st.warning("Select a task first.")
         else:
             n_demos = get_demo_count(st.session_state.current_task)
-            st.markdown(f"**Task:** `{st.session_state.current_task}` - {n_demos} demos")
+            st.markdown(f"**Task:** `{st.session_state.current_task}` — {n_demos} demos")
 
             if n_demos < 5:
                 st.warning(f"Only {n_demos} demos. Recommend at least 20 before training.")
@@ -269,7 +540,7 @@ def main():
             with col1:
                 n_epochs = st.number_input("Epochs", value=500, min_value=100, step=100)
             with col2:
-                batch_size = st.number_input("Batch size", value=100, min_value=16)
+                batch_size = st.number_input("Batch size", value=16, min_value=8)
 
             if st.button(
                 "⚙ Train locally",
@@ -282,7 +553,7 @@ def main():
 
                 def train():
                     st.session_state.training = True
-                    log(f"Training started - {n_epochs} epochs")
+                    log(f"Training started — {n_epochs} epochs")
                     cmd = [
                         "python", "-m", "robomimic.scripts.train",
                         "--config", str(config_path),
@@ -297,7 +568,8 @@ def main():
                             log(line)
                     proc.wait()
                     st.session_state.training = False
-                    log("Training finished" if proc.returncode == 0 else f"Training failed (code {proc.returncode})")
+                    log("Training finished" if proc.returncode == 0
+                        else f"Training failed (code {proc.returncode})")
 
                 run_in_thread(train)
                 st.rerun()
@@ -306,18 +578,18 @@ def main():
             st.subheader("Snellius (remote)")
             st.code(
                 f"scp {DEMOS_DIR / st.session_state.current_task / 'demos.hdf5'} "
-                f"bmajchrzak@snellius.surf.nl:~/thesis/\nsbatch ~/thesis/train.job",
-                language="bash"
+                f"bmajchrzak@snellius.surf.nl:~/thesis/\n"
+                f"sbatch ~/thesis/train.job",
+                language="bash",
             )
 
-            # Model list
             models = get_models(st.session_state.current_task)
             if models:
                 st.subheader("Saved checkpoints")
                 for m in models[-5:]:
                     st.text(Path(m).name)
 
-    # EXECUTE tab
+    # ── EXECUTE tab ───────────────────────────────────────────────────────────
     with tab_execute:
         st.header("Execute Policy")
 
@@ -335,64 +607,74 @@ def main():
 
             col1, col2 = st.columns(2)
             with col1:
-                horizon = st.number_input("Horizon (steps)", value=200, min_value=50, step=5)
+                horizon = st.number_input("Horizon (steps)", value=200, min_value=50, step=50)
             with col2:
                 action_scale = st.slider("Action scale", 0.1, 2.0, 1.0, 0.1)
 
-            st.warning("⚠ Make sure the workspace is clear before running.")
+            if st.session_state.mode == "Real Robot":
+                st.warning("⚠ Make sure the workspace is clear before running.")
 
-            col_run, col_stop = st.columns(2)
-            with col_run:
-                if st.button(
-                    "▶ Run Policy",
-                    disabled=st.session_state.executing or not st.session_state.robot_connected,
-                    type="primary",
-                ):
-                    def execute():
-                        st.session_state.executing = True
-                        log(f"Running policy: {Path(model_path).name}")
-                        cmd = [
-                            "python", "-u", str(EXECUTE_PATH),
-                            "--policy", model_path,
-                            "--horizon", str(horizon),
-                        ]
-                        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                                stderr=subprocess.STDOUT, text=True)
-                        for line in proc.stdout:
-                            log(line.strip())
-                        proc.wait()
+                col_run, col_stop = st.columns(2)
+                with col_run:
+                    if st.button(
+                        "▶ Run on Robot",
+                        disabled=st.session_state.executing or not st.session_state.robot_connected,
+                        type="primary",
+                    ):
+                        def execute():
+                            st.session_state.executing = True
+                            log(f"Running policy: {Path(model_path).name}")
+                            cmd = [
+                                "python", "-u", str(EXECUTE_PATH),
+                                "--policy", model_path,
+                                "--horizon", str(horizon),
+                            ]
+                            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                                    stderr=subprocess.STDOUT, text=True)
+                            for line in proc.stdout:
+                                log(line.strip())
+                            proc.wait()
+                            st.session_state.executing = False
+                            log("Execution finished")
+
+                        run_in_thread(execute)
+                        st.rerun()
+
+                with col_stop:
+                    if st.button("■ Stop", disabled=not st.session_state.executing, type="secondary"):
                         st.session_state.executing = False
-                        log("Execution finished")
+                        log("Execution stopped by user")
 
-                    run_in_thread(execute)
-                    st.rerun()
+                if st.session_state.executing:
+                    st.warning("🟡 Policy running...")
 
-            with col_stop:
-                if st.button("■ Stop", disabled=not st.session_state.executing, type="secondary"):
-                    st.session_state.executing = False
-                    log("Execution stopped by user")
-
-            if st.session_state.executing:
-                st.warning("🟡 Policy running...")
+            else:
+                # Simulation execution
+                st.info("Run the policy in simulation using the test script.")
+                task_name = st.session_state.current_task or ""
+                st.code(
+                    f"cd src/simulation\n"
+                    f"python test_{task_name.lower()}_env.py",
+                    language="bash",
+                )
 
             # Feedback
-            if not st.session_state.executing and len(get_models(st.session_state.current_task or "")) > 0:
+            if not st.session_state.executing:
                 st.divider()
                 st.subheader("Rate last execution")
                 col_good, col_bad = st.columns(2)
                 with col_good:
-                    if st.button("👍 Good", type="primary"):
+                    if st.button("👍 Worked", type="primary"):
                         log("Execution rated: GOOD")
                 with col_bad:
-                    if st.button("👎 Bad"):
-                        log("Execution rated: BAD - consider adding more demos")
+                    if st.button("👎 Failed"):
+                        log("Execution rated: BAD — consider adding more demos")
 
-    # LOG tab
+    # ── LOG tab ───────────────────────────────────────────────────────────────
     with tab_log:
         st.header("Activity Log")
         if st.button("Clear log"):
             st.session_state.log = []
-
         log_text = "\n".join(reversed(st.session_state.log)) if st.session_state.log else "No activity yet."
         st.text_area("Log", value=log_text, height=400, label_visibility="collapsed")
 
