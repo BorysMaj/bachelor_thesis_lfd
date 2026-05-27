@@ -226,6 +226,8 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
             # write datasets for states and actions
             ep_data_grp.create_dataset("states", data=np.array(states))
             ep_data_grp.create_dataset("actions", data=np.array(actions))
+            print(f"Demonstration saved: {num_eps}")
+
         else:
             print("Demonstration is unsuccessful and has NOT been saved")
 

@@ -24,8 +24,6 @@ CONFIG_DIR    = Path("config")
 ASSETS_DIR    = Path(__file__).parent / "assets"
 RECORDER_PATH = Path(__file__).parent / "src/robot_control/demo_recorder.py"
 EXECUTE_PATH  = Path(__file__).parent / "src/learning/execute_policy.py"
-# Use our custom script (auto-imports all custom envs, has better button bindings)
-COLLECT_SCRIPT = Path(__file__).parent / "src/simulation/collect_sim_demos.py"
 
 # Maps UI task names to robosuite env names
 TASK_TO_ENV = {
@@ -144,7 +142,6 @@ def launch_sim_collection(task_name: str, env_name: str):
     Returns the Popen object for the terminal.
     """
     output_dir = str((DEMOS_DIR / task_name).resolve())
-    script = str(COLLECT_SCRIPT.resolve())
     cmd_inner = (
         f"cd {Path(__file__).parent.resolve()} && "
         f"sudo /home/borys/miniconda3/envs/franka/bin/python -m robosuite.scripts.collect_human_demonstrations "
