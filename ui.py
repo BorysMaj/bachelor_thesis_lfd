@@ -184,6 +184,14 @@ def process_sim_demos(demo_path: Path):
         "--output_name", "obs.hdf5",
         "--done_mode", "0",
     ]
+    def _run():
+        proc1 = subprocess.run(cmd1, capture_output=True, text=True, cwd=str(Path(__file__).parent))
+        if proc1.returncode != 0:
+            st.session_state.sim_log = f"Failed: {proc1.stderr[-500:]}"
+        st.session_state.sim_processing = False
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
     proc1 = subprocess.run(cmd1, capture_output=True, text=True,
                            cwd=str(Path(__file__).parent))
     if proc1.returncode != 0:
@@ -191,8 +199,8 @@ def process_sim_demos(demo_path: Path):
         st.session_state.sim_processing = False
         return
 
-    log(f"Saved obs.hdf5 → {obs_path}")
-    log("Step 2/2 - split_train_val …")
+    log(f"Saved obs.hdf5 to {obs_path}")
+    log("Step 2/2 - split_train_val")
 
     cmd2 = [
         "python", "-m", "robomimic.scripts.split_train_val",
@@ -230,7 +238,6 @@ def sim_preview(task_name: str):
                 background: #1a1a1a;
             ">
                 Simulation preview<br>
-                <small>Drop <code>assets/sim_{task}.png</code> to show a screenshot here</small>
             </div>
             """,
             unsafe_allow_html=True,
