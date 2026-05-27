@@ -25,9 +25,6 @@ from robosuite.controllers import load_composite_controller_config
 from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 
-# Register custom environments
-from src.simulation.user_study_env import UserStudyEnv
-
 
 def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
     """
@@ -53,6 +50,7 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
     print("Perform the task, then press 'e' or both SpaceMouse buttons to confirm.")
     print("Press right SpaceMouse button to discard and reset.\n")
 
+    task_completion_hold_count = -1  # counter to collect 10 timesteps after reaching goal
     device.start_control()
 
     for robot in env.robots:
@@ -68,6 +66,7 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
         for robot in env.robots
     ]
 
+    # Loop until we get a reset from the input or the task completes
     while True:
         start = time.time()
 
@@ -137,6 +136,14 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
         else:
             task_completion_hold_count = -1  # null the counter if there's no success
 
+        # limit frame rate if necessary
+        if max_fr is not None:
+            elapsed = time.time() - start
+            diff = 1 / max_fr - elapsed
+            if diff > 0:
+                time.sleep(diff)
+
+    # cleanup for end of data collection episodes
     env.close()
 
 
@@ -262,11 +269,13 @@ if __name__ == "__main__":
         nargs="*",
         type=str,
         default="agentview",
+        help="List of camera names to use for collecting demos. Pass multiple names to enable multiple views. Note: the `mujoco` renderer must be enabled when using multiple views; `mjviewer` is not supported.",
     )
     parser.add_argument(
         "--controller",
         type=str,
         default=None,
+        help="Choice of controller. Can be generic (eg. 'BASIC' or 'WHOLE_BODY_MINK_IK') or json file (see robosuite/controllers/config for examples)",
     )
     parser.add_argument("--device", type=str, default="spacemouse")
     parser.add_argument(
@@ -298,12 +307,6 @@ if __name__ == "__main__":
         type=bool,
         default=False,
         help="(DualSense Only)Reverse the effect of the x and y axes of the joystick.It is used to handle the case that the left/right and front/back sides of the view are opposite to the LX and LY of the joystick(Push LX up but the robot move left in your view)",
-    )
-    parser.add_argument(
-        "--goal_update_mode",
-        type=str,
-        default="target",
-        choices=["target", "achieved"],
     )
     parser.add_argument(
         "--goal_update_mode",

@@ -165,7 +165,6 @@ class Sandbox(ManipulationEnv):
             size_min=(0.025,),
             size_max=(0.025,),
             rgba=[0.1, 0.8, 0.1, 1],
-            rng=self.rng,
         )
 
         self.model = ManipulationTask(

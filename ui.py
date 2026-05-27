@@ -47,6 +47,7 @@ SIM_PREVIEWS = {
     "Push":   ASSETS_DIR / "sim_push.png",
     "Lift":   ASSETS_DIR / "sim_lift.png",
     "Stack":  ASSETS_DIR / "sim_stack.png",
+    "Sandbox":  ASSETS_DIR / "sim_sandbox.png",
 }
 
 # Session state
@@ -121,7 +122,7 @@ def run_in_thread(fn, *args):
 def task_to_env(task_name: str) -> str:
     """Map a UI task name to its robosuite environment name."""
     key = task_name.strip().lower()
-    return TASK_TO_ENV.get(key, "Playground")
+    return TASK_TO_ENV.get(key, "Sandbox")
 
 
 def find_latest_demo(task_name: str):
