@@ -102,12 +102,10 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
         # so the confirmation is recorded in this step
         if getattr(device, "_demo_confirmed", False):
             print("Demo confirmed as successful! Saving")
-            # Unwrap to reach the base env and set the success flag
-            base_env = env
-            while hasattr(base_env, "env"):
-                base_env = base_env.env
-            if hasattr(base_env, "_user_confirmed"):
-                base_env._user_confirmed = True
+            # Write a marker file in the episode directory.
+            if hasattr(env, "ep_directory") and env.ep_directory is not None:
+                with open(os.path.join(env.ep_directory, "confirmed"), "w") as marker:
+                    marker.write("1")
 
         # Maintain gripper state for each robot but only update the active robot with action
         env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]
@@ -197,7 +195,13 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
             states.extend(dic["states"])
             for ai in dic["action_infos"]:
                 actions.append(ai["actions"])
-            success = success or dic["successful"]
+
+        # Success is determined by either:
+        # 1. The env's own _check_success() — works for Lift, Push, Reach, etc.
+        # 2. A "confirmed" marker file written when user pressed 'e' or both
+        # SpaceMouse buttons — used for UserStudyEnv which has no auto-success.
+        confirmed_path = os.path.join(directory, ep_directory, "confirmed")
+        success = success or os.path.exists(confirmed_path) or dic["successful"]
 
         if len(states) == 0:
             continue
