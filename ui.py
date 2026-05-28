@@ -99,15 +99,28 @@ def get_tasks():
     return sorted([d.name for d in DEMOS_DIR.iterdir() if d.is_dir()])
 
 def get_demo_count(task: str) -> int:
-    path = DEMOS_DIR / task / "demos.hdf5"
-    if not path.exists():
-        return 0
-    try:
-        import h5py
-        with h5py.File(path, "r") as f:
-            return len(f["data"].keys())
-    except Exception:
-        return 0
+    import h5py
+    total = 0
+
+    # Real robot demos - demos.hdf5 directly in task folder
+    real_path = DEMOS_DIR / task / "demos.hdf5"
+    if real_path.exists():
+        try:
+            with h5py.File(real_path, "r") as f:
+                total += len(f["data"].keys())
+        except Exception:
+            pass
+
+    # Sim demos - demo.hdf5 inside timestamped subdirectories
+    sim_pattern = str(DEMOS_DIR / task / "**" / "demo.hdf5")
+    for sim_demo in glob.glob(sim_pattern, recursive=True):
+        try:
+            with h5py.File(sim_demo, "r") as f:
+                total += len(f["data"].keys())
+        except Exception:
+            pass
+
+    return total
 
 def get_models(task: str):
     pattern = str(MODELS_DIR / task / "**" / "*.pth")
