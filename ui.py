@@ -227,12 +227,29 @@ def sim_preview(task_name: str):
     # Match task name
     key = next((k for k in SIM_PREVIEWS if k.lower() in task_name.lower()), None)
     path = SIM_PREVIEWS.get(key) if key else None
+    sandbox_path = SIM_PREVIEWS.get("Sandbox")
 
     if path and path.exists():
-        st.image(str(path), caption=f"{key} - simulation view", use_container_width=True)
-    else:
+        st.image(str(path), caption=f"{key} - simulation view", width='content')
+    elif sandbox_path.exists():
         sandbox_path = SIM_PREVIEWS.get("Sandbox")
-        st.image(str(sandbox_path), caption="Sandbox - simulation view", use_container_width=True)
+        st.image(str(sandbox_path), caption="Sandbox - simulation view", width='content')
+    else:
+        st.markdown(
+            """
+            <div style="
+                border: 2px dashed #555;
+                border-radius: 8px;
+                padding: 40px;
+                text-align: center;
+                color: #888;
+                background: #1a1a1a;
+            ">
+                Simulation preview<br>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # Main UI 
 
@@ -432,6 +449,7 @@ def main():
                             "- **Move / tilt** → move end-effector\n"
                             "- **Left button** → hold to close gripper\n"
                             "- **Right button** → reset the demo\n"
+                            "- **Both buttons** → save the demo\n"
                             "- **CTRL + Q** in viewer → quit\n"
                             "- **CTRL + C** in terminal (after collecting all demos) → quit"
                         )
