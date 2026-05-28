@@ -221,9 +221,9 @@ def process_sim_demos(demo_path: Path):
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    
+
 def sim_preview(task_name: str):
-    """Show the simulation screenshot for a task if it exists."""
+    """Show the simulation screenshot for a task or Playground env."""
     # Match task name
     key = next((k for k in SIM_PREVIEWS if k.lower() in task_name.lower()), None)
     path = SIM_PREVIEWS.get(key) if key else None
@@ -231,22 +231,8 @@ def sim_preview(task_name: str):
     if path and path.exists():
         st.image(str(path), caption=f"{key} - simulation view", use_container_width=True)
     else:
-        # TEMP
-        st.markdown(
-            """
-            <div style="
-                border: 2px dashed #555;
-                border-radius: 8px;
-                padding: 40px;
-                text-align: center;
-                color: #888;
-                background: #1a1a1a;
-            ">
-                Simulation preview<br>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        sandbox_path = SIM_PREVIEWS.get("Sandbox")
+        st.image(str(sandbox_path), caption="Sandbox - simulation view", use_container_width=True)
 
 # Main UI 
 
@@ -525,7 +511,7 @@ def main():
             n_demos = get_demo_count(st.session_state.current_task)
             st.markdown(f"**Task:** `{st.session_state.current_task}` - {n_demos} demos")
 
-            if n_demos < 5:
+            if n_demos < 15:
                 st.warning(f"Only {n_demos} demos. Recommend at least 20 before training.")
 
             st.subheader("Local training")
