@@ -180,54 +180,48 @@ def launch_sim_collection(task_name: str, env_name: str):
 
 def process_sim_demos(demo_path: Path):
     """
-    Background thread: run dataset_states_to_obs then split_train_val on demo_path.
-    Updates session state flags and logs progress.
+    Run dataset_states_to_obs then split_train_val in a background thread.
     """
     st.session_state.sim_processing = True
     obs_path = demo_path.parent / "obs.hdf5"
+    cwd = str(Path(__file__).parent)
 
-    log(f"Processing: {demo_path.name}")
-    log("Step 1/2 - dataset_states_to_obs")
-
-    cmd1 = [
-        "python", "-m", "robomimic.scripts.dataset_states_to_obs",
-        "--dataset", str(demo_path),
-        "--output_name", "obs.hdf5",
-        "--done_mode", "0",
-    ]
     def _run():
-        proc1 = subprocess.run(cmd1, capture_output=True, text=True, cwd=str(Path(__file__).parent))
+        # 1: convert states to observations
+        log(f"Processing: {demo_path.name}")
+        log("Step 1 - dataset_states_to_obs")
+        cmd1 = [
+            "python", "-m", "robomimic.scripts.dataset_states_to_obs",
+            "--dataset", str(demo_path),
+            "--output_name", "obs.hdf5",
+            "--done_mode", "0",
+        ]
+        proc1 = subprocess.run(cmd1, capture_output=True, text=True, cwd=cwd)
         if proc1.returncode != 0:
-            st.session_state.sim_log = f"Failed: {proc1.stderr[-500:]}"
+            log(f"dataset_states_to_obs failed:\n{proc1.stderr[-500:]}")
+            st.session_state.sim_processing = False
+            return
+
+        log(f"Saved obs.hdf5 to {obs_path}")
+        log("Step 2 - split_train_val")
+
+        # Step 2: split into train/val
+        cmd2 = [
+            "python", "-m", "robomimic.scripts.split_train_val",
+            "--dataset", str(obs_path),
+            "--ratio", "0.1",
+        ]
+        proc2 = subprocess.run(cmd2, capture_output=True, text=True, cwd=cwd)
+        if proc2.returncode != 0:
+            log(f"split_train_val failed:\n{proc2.stderr[-500:]}")
+        else:
+            log("Train/val split done. Demos are ready for training.")
+
         st.session_state.sim_processing = False
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
-    proc1 = subprocess.run(cmd1, capture_output=True, text=True,
-                           cwd=str(Path(__file__).parent))
-    if proc1.returncode != 0:
-        log(f"dataset_states_to_obs failed:\n{proc1.stderr[-500:]}")
-        st.session_state.sim_processing = False
-        return
-
-    log(f"Saved obs.hdf5 to {obs_path}")
-    log("Step 2/2 - split_train_val")
-
-    cmd2 = [
-        "python", "-m", "robomimic.scripts.split_train_val",
-        "--dataset", str(obs_path),
-        "--ratio", "0.1",
-    ]
-    proc2 = subprocess.run(cmd2, capture_output=True, text=True,
-                           cwd=str(Path(__file__).parent))
-    if proc2.returncode != 0:
-        log(f"split_train_val failed:\n{proc2.stderr[-500:]}")
-    else:
-        log("Train/val split done. Demos are ready for training.")
-
-    st.session_state.sim_processing = False
-
-
+    
 def sim_preview(task_name: str):
     """Show the simulation screenshot for a task if it exists."""
     # Match task name
