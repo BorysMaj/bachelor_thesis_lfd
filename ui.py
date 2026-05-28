@@ -180,50 +180,40 @@ def launch_sim_collection(task_name: str, env_name: str):
 
 def process_sim_demos(demo_path: Path):
     """
-    Run dataset_states_to_obs then split_train_val in a background thread.
+    Run dataset_states_to_obs then split_train_val in a new gnome-terminal window.
+    Both commands run sequentially in one terminal so the user can watch progress.
     """
-    st.session_state.sim_processing = True
     obs_path = demo_path.parent / "obs.hdf5"
-    cwd = str(Path(__file__).parent)
 
-    def _run():
-        # 1: convert states to observations
-        log(f"Processing: {demo_path.name}")
-        log("Step 1 - dataset_states_to_obs")
-        cmd1 = [
-            "python", "-m", "robomimic.scripts.dataset_states_to_obs",
-            "--dataset", str(demo_path),
-            "--output_name", "obs.hdf5",
-            "--done_mode", "0",
-        ]
-        proc1 = subprocess.run(cmd1, capture_output=True, text=True, cwd=cwd)
-        if proc1.returncode != 0:
-            log(f"dataset_states_to_obs failed:\n{proc1.stderr[-500:]}")
-            st.session_state.sim_processing = False
-            return
+    cmd1 = [
+        "python", "-m", "robomimic.scripts.dataset_states_to_obs",
+        "--dataset", str(demo_path),
+        "--output_name", "obs.hdf5",
+        "--done_mode", "0",
+    ]
+    cmd2 = [
+        "python", "-m", "robomimic.scripts.split_train_val",
+        "--dataset", str(obs_path),
+        "--ratio", "0.1",
+    ]
 
-        log(f"Saved obs.hdf5 to {obs_path}")
-        log("Step 2 - split_train_val")
+    cmd1_str = " ".join(cmd1)
+    cmd2_str = " ".join(cmd2)
+    bash_cmd = (
+        f"{cmd1_str} && "
+        f"{cmd2_str}"
+    )
 
-        # Step 2: split into train/val
-        cmd2 = [
-            "python", "-m", "robomimic.scripts.split_train_val",
-            "--dataset", str(obs_path),
-            "--ratio", "0.1",
-        ]
-        proc2 = subprocess.run(cmd2, capture_output=True, text=True, cwd=cwd)
-        if proc2.returncode != 0:
-            log(f"split_train_val failed:\n{proc2.stderr[-500:]}")
-        else:
-            log("Train/val split done. Demos are ready for training.")
-
-        st.session_state.sim_processing = False
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-
+    subprocess.Popen(
+        ["gnome-terminal", "--", "bash", "-c", bash_cmd],
+        cwd=str(Path(__file__).parent)
+    )
+    log("Processing started in a new terminal window.")
+    log("When done, click Refresh to check if obs.hdf5 is ready.")
+    st.session_state.sim_processing = False
+    
 def sim_preview(task_name: str):
-    """Show the simulation screenshot for a task or Playground env."""
+    """Show the simulation screenshot for a task or Sandbox env."""
     # Match task name
     key = next((k for k in SIM_PREVIEWS if k.lower() in task_name.lower()), None)
     path = SIM_PREVIEWS.get(key) if key else None
@@ -549,26 +539,21 @@ def main():
                 config_path = CONFIG_DIR / st.session_state.current_task / "bc_rnn.json"
 
                 def train():
-                    st.session_state.training = True
-                    log(f"Training started - {n_epochs} epochs")
                     cmd = [
                         "python", "-m", "robomimic.scripts.train",
                         "--config", str(config_path),
                         "--dataset", str(dataset_path),
                         "--output_dir", str(output_dir),
                     ]
-                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT, text=True)
-                    for line in proc.stdout:
-                        line = line.strip()
-                        if any(k in line for k in ["Loss", "Epoch", "loss", "error"]):
-                            log(line)
-                    proc.wait()
-                    st.session_state.training = False
-                    log("Training finished" if proc.returncode == 0
-                        else f"Training failed (code {proc.returncode})")
 
-                run_in_thread(train)
+                    subprocess.Popen(
+                        ["gnome-terminal", "--", "bash", "-c", cmd],
+                        cwd=str(Path(__file__).parent)
+                    )
+                    log(f"Training started in a new terminal - {n_epochs} epochs")
+                    st.session_state.training = False
+
+                train()
                 st.rerun()
 
             st.divider()
@@ -619,22 +604,20 @@ def main():
                         type="primary",
                     ):
                         def execute():
-                            st.session_state.executing = True
-                            log(f"Running policy: {Path(model_path).name}")
                             cmd = [
                                 "python", "-u", str(EXECUTE_PATH),
                                 "--policy", model_path,
                                 "--horizon", str(horizon),
                             ]
-                            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                                    stderr=subprocess.STDOUT, text=True)
-                            for line in proc.stdout:
-                                log(line.strip())
-                            proc.wait()
-                            st.session_state.executing = False
-                            log("Execution finished")
 
-                        run_in_thread(execute)
+                            subprocess.Popen(
+                                ["gnome-terminal", "--", "bash", "-c", cmd],
+                                cwd=str(Path(__file__).parent)
+                            )
+                            log(f"Policy execution started in a new terminal.")
+                            st.session_state.executing = False
+
+                        execute()
                         st.rerun()
 
                 with col_stop:
@@ -647,13 +630,20 @@ def main():
 
             else:
                 # Simulation execution
-                if st.button("▶ Execute"):
+                if st.button("▶ Execute in Simulation"):
+                    cmd = [
+                        "python", "-m", "robomimic.scripts.run_trained_agent",
+                        "--agent", model_path,
+                        "--n_rollouts", str(num_demos_ex),
+                        "--horizon", str(horizon),
+                        "--render",
+                    ]
 
-                    task_name = st.session_state.current_task or ""
-                st.code(
-                    f"python -m robomimic.scripts.run_trained_agent --agent {model_path} --n_rollouts {num_demos_ex} --horizon {horizon} --render",
-                    language="bash",
-                )
+                    subprocess.Popen(
+                        ["gnome-terminal", "--", "bash", "-c", cmd],
+                        cwd=str(Path(__file__).parent)
+                    )
+                    log("Sim execution started in a new terminal.")
 
             # Feedback
             if not st.session_state.executing:
