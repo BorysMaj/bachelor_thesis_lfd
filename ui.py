@@ -200,8 +200,10 @@ def process_sim_demos(demo_path: Path):
     cmd1_str = " ".join(cmd1)
     cmd2_str = " ".join(cmd2)
     bash_cmd = (
-        f"{cmd1_str} && "
-        f"{cmd2_str}"
+        f"{cmd1_str} && {cmd2_str} && "
+        f"echo '' && echo '--- Processing complete! ---' || "
+        f"echo '' && echo '--- Processing FAILED. Check errors above. ---'; "
+        f"echo 'Press Enter to close...'; read"
     )
 
     subprocess.Popen(
@@ -545,9 +547,15 @@ def main():
                         "--dataset", str(dataset_path),
                         "--output_dir", str(output_dir),
                     ]
+                    cmd_str = " ".join(cmd)
+                    bash_cmd = (
+                        f"{cmd_str} && echo '' && echo '--- Training complete! ---' || "
+                        f"echo '' && echo '--- Training FAILED. ---'; "
+                        f"echo 'Press Enter to close...'; read"
+                    )
 
                     subprocess.Popen(
-                        ["gnome-terminal", "--", "bash", "-c", cmd],
+                        ["gnome-terminal", "--", "bash", "-c", bash_cmd],
                         cwd=str(Path(__file__).parent)
                     )
                     log(f"Training started in a new terminal - {n_epochs} epochs")
@@ -609,9 +617,15 @@ def main():
                                 "--policy", model_path,
                                 "--horizon", str(horizon),
                             ]
+                            cmd_str = " ".join(cmd)
+                            bash_cmd = (
+                                f"{cmd_str} && echo '' && echo '--- Execution complete! ---' || "
+                                f"echo '' && echo '--- Execution FAILED. ---'; "
+                                f"echo 'Press Enter to close...'; read"
+                            )
 
                             subprocess.Popen(
-                                ["gnome-terminal", "--", "bash", "-c", cmd],
+                                ["gnome-terminal", "--", "bash", "-c", bash_cmd],
                                 cwd=str(Path(__file__).parent)
                             )
                             log(f"Policy execution started in a new terminal.")
@@ -638,9 +652,15 @@ def main():
                         "--horizon", str(horizon),
                         "--render",
                     ]
+                    cmd_str = " ".join(cmd)
+                    bash_cmd = (
+                        f"{cmd_str} && echo '' && echo '--- Execution complete! ---' || "
+                        f"echo '' && echo '--- Execution FAILED. ---'; "
+                        f"echo 'Press Enter to close...'; read"
+                    )
 
                     subprocess.Popen(
-                        ["gnome-terminal", "--", "bash", "-c", cmd],
+                        ["gnome-terminal", "--", "bash", "-c", bash_cmd],
                         cwd=str(Path(__file__).parent)
                     )
                     log("Sim execution started in a new terminal.")
