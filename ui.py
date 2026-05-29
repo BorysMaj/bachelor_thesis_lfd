@@ -162,7 +162,9 @@ def launch_sim_collection(task_name: str, env_name: str):
         f"--robots Panda "
         f"--device spacemouse "
         f"--directory {output_dir}; "
-        f"echo ''; echo 'Collection done - press Enter to close'; read"
+        f"echo ''; echo 'Fixing file ownership...'; "
+        f"sudo chown -R $USER:$USER {output_dir}; "
+        f"echo 'Collection done - press Enter to close'; read"
     )
     # Try gnome-terminal first, fall back to xterm
     try:
