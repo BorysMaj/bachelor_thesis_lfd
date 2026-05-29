@@ -147,8 +147,11 @@ def merge(input_paths: list[Path], out_path: Path,
                 env_args_str = val
                 break
 
-        # Write output
+        # Write output - delete existing merged file first so it's always fresh
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        if out_path.exists():
+            print(f"\n  Deleting existing merged file: {out_path}")
+            out_path.unlink()
 
         with h5py.File(out_path, "w") as fout:
             dst = fout.create_group("data")
