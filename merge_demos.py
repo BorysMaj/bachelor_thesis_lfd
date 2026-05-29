@@ -1,25 +1,19 @@
 """
-Merge two robomimic HDF5 demo files into one.
-Designed to combine simulation demos with real-robot demos.
-
-Both files must already have matching observation keys.
-Keys only present in one file are dropped (with a warning) unless
-you pass --keep-all, which zero-pads the missing ones.
+Merge two or more robomimic HDF5 demo files into one.
+Designed to combine simulation demos, real-robot demos, and existing merged files.
 
 Usage:
-    python src/data/merge_demos.py \
-        --sim  data/reach/obs.hdf5 \
-        --real data/reach/real_demos.hdf5 \
-        --out  data/reach/merged.hdf5
+    # Merge multiple files (any number)
+    python merge_demos.py --inputs data/reach/obs1.hdf5 data/reach/obs2.hdf5 --out data/reach/merged/merged.hdf5
 
-    # Keep all obs keys (zero-pad missing ones)
-    python src/data/merge_demos.py --sim ... --real ... --out ... --keep-all
+    # Legacy two-file interface still works
+    python merge_demos.py --sim data/reach/obs.hdf5 --real data/reach/real_demos.hdf5 --out data/reach/merged/merged.hdf5
 
-    # Override train/val split ratio (default 0.1 = 10% validation)
-    python src/data/merge_demos.py --sim ... --real ... --out ... --val-ratio 0.2
+    # Keep all obs keys (zero-pad missing ones instead of taking intersection)
+    python merge_demos.py --inputs ... --out ... --keep-all
 
     # Preview what would happen without writing anything
-    python src/data/merge_demos.py --sim ... --real ... --out ... --dry-run
+    python merge_demos.py --inputs ... --out ... --dry-run
 """
 
 import argparse
@@ -51,7 +45,7 @@ def align_obs(src_group, target_keys: set):
         if key in src_keys:
             result[key] = obs[key][:]
         else:
-            warnings.append(f" WARN: '{key}' missing in this demo - will be zero-padded")
+            warnings.append(f"  WARN: '{key}' missing in this demo - will be zero-padded")
 
     extra = src_keys - target_keys
     if extra:
@@ -77,7 +71,7 @@ def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
 
     grp.create_dataset("actions", data=src_group["actions"][:])
     grp.create_dataset("rewards", data=src_group["rewards"][:] if "rewards" in src_group else np.zeros(T))
-    grp.create_dataset("dones", data=src_group["dones"][:] if "dones"   in src_group else np.zeros(T))
+    grp.create_dataset("dones",   data=src_group["dones"][:]   if "dones"   in src_group else np.zeros(T))
     if "states" in src_group:
         grp.create_dataset("states", data=src_group["states"][:])
 
@@ -86,7 +80,7 @@ def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
         if key in obs_dict:
             og.create_dataset(key, data=obs_dict[key])
         else:
-            # Zero-pad: use shape recorded from the other file
+            # Zero-pad: use shape recorded from another file
             shape = (T,) + key_shapes.get(key, (1,))
             og.create_dataset(key, data=np.zeros(shape, dtype=np.float32))
 
@@ -94,41 +88,37 @@ def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
 
 
 # Main
-def merge(sim_path: Path, real_path: Path, out_path: Path,
+def merge(input_paths: list[Path], out_path: Path,
           val_ratio: float, keep_all: bool, dry_run: bool, seed: int):
 
-    print(f" SIM : {sim_path}")
-    print(f" REAL : {real_path}")
-    print(f" OUT : {out_path}")
+    print(f"  Merging {len(input_paths)} file(s) → {out_path}")
+    for p in input_paths:
+        print(f"    {p}")
 
-    with h5py.File(sim_path, "r") as fsim, \
-         h5py.File(real_path, "r") as freal:
+    # Open all files and load demos
+    open_files = [h5py.File(p, "r") for p in input_paths]
+    try:
+        all_demo_lists = [list(iter_demos(f)) for f in open_files]
 
-        sim_demos = list(iter_demos(fsim))
-        real_demos = list(iter_demos(freal))
+        for i, (path, demos) in enumerate(zip(input_paths, all_demo_lists)):
+            print(f"\n  [{i+1}] {path.name}: {len(demos)} demos")
 
-        print(f"Sim demos : {len(sim_demos)}")
-        print(f"Real demos : {len(real_demos)}")
-
-        sim_obs_keys = get_obs_keys(sim_demos[0][1])
-        real_obs_keys = get_obs_keys(real_demos[0][1])
-
-        print(f"\n Sim obs keys : {sorted(sim_obs_keys)}")
-        print(f"Real obs keys : {sorted(real_obs_keys)}")
+        # Determine target obs keys
+        all_key_sets = [get_obs_keys(demos[0][1]) for demos in all_demo_lists if demos]
+        if not all_key_sets:
+            print("  ERROR: No demos found in any file.")
+            return
 
         if keep_all:
-            target_keys = sim_obs_keys | real_obs_keys
+            target_keys = set.union(*all_key_sets)
         else:
-            target_keys = sim_obs_keys & real_obs_keys
+            target_keys = set.intersection(*all_key_sets)
 
-        dropped_sim  = sim_obs_keys  - target_keys
-        dropped_real = real_obs_keys - target_keys
-
-        print(f"\n  Merged obs keys : {sorted(target_keys)}")
-        if dropped_sim:
-            print(f"  Dropping from sim  : {sorted(dropped_sim)}")
-        if dropped_real:
-            print(f"  Dropping from real : {sorted(dropped_real)}")
+        print(f"\n  Obs keys kept : {sorted(target_keys)}")
+        for i, (ks, path) in enumerate(zip(all_key_sets, input_paths)):
+            dropped = ks - target_keys
+            if dropped:
+                print(f"  Dropping from {path.name}: {sorted(dropped)}")
 
         core = {"robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"}
         missing_core = core - target_keys
@@ -136,20 +126,29 @@ def merge(sim_path: Path, real_path: Path, out_path: Path,
             print(f"\n  WARN: core robot keys missing: {missing_core}")
 
         if dry_run:
-            print("\n  [DRY RUN] Nothing written.")
+            total = sum(len(d) for d in all_demo_lists)
+            print(f"\n  [DRY RUN] Would write {total} demos. Nothing written.")
             return
 
         # Record shapes of each key (for zero-padding when a key is absent)
         key_shapes = {}
+        all_demos_flat = [grp for demos in all_demo_lists for _, grp in demos]
         for key in target_keys:
-            for _, grp in sim_demos + real_demos:
-                if key in grp["obs"]:
+            for grp in all_demos_flat:
+                if "obs" in grp and key in grp["obs"]:
                     key_shapes[key] = grp["obs"][key].shape[1:]
                     break
 
-        # Write
+        # Get env_args from first file that has it
+        env_args_str = "{}"
+        for f in open_files:
+            val = f["data"].attrs.get("env_args", None)
+            if val:
+                env_args_str = val
+                break
+
+        # Write output
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        env_args_str = fsim["data"].attrs.get("env_args", "{}")
 
         with h5py.File(out_path, "w") as fout:
             dst = fout.create_group("data")
@@ -157,39 +156,32 @@ def merge(sim_path: Path, real_path: Path, out_path: Path,
 
             idx = 0
             total_steps = 0
-            sim_names = []
-            real_names = []
+            names_per_file = []
 
-            print(f"\n  Copying {len(sim_demos)} sim demos …")
-            for _, grp in sim_demos:
-                obs_dict, warns = align_obs(grp, target_keys)
-                for w in warns:
-                    print(w)
-                T = copy_demo(grp, dst, idx, obs_dict, target_keys, key_shapes)
-                total_steps += T
-                sim_names.append(f"demo_{idx}")
-                idx += 1
-
-            print(f"  Copying {len(real_demos)} real demos …")
-            for _, grp in real_demos:
-                obs_dict, warns = align_obs(grp, target_keys)
-                for w in warns:
-                    print(w)
-                T = copy_demo(grp, dst, idx, obs_dict, target_keys, key_shapes)
-                total_steps += T
-                real_names.append(f"demo_{idx}")
-                idx += 1
+            for file_idx, (path, demos) in enumerate(zip(input_paths, all_demo_lists)):
+                print(f"\n  Copying {len(demos)} demos from {path.name} …")
+                file_names = []
+                for _, grp in demos:
+                    obs_dict, warns = align_obs(grp, target_keys)
+                    for w in warns:
+                        print(w)
+                    T = copy_demo(grp, dst, idx, obs_dict, target_keys, key_shapes)
+                    total_steps += T
+                    file_names.append(f"demo_{idx}")
+                    idx += 1
+                names_per_file.append(file_names)
 
             dst.attrs["total"] = total_steps
 
-            # Stratified train/val split
+            # Stratified train/val split across all source files
             rng = random.Random(seed)
-            sim_val_n = max(1, int(len(sim_names)  * val_ratio))
-            real_val_n = max(1, int(len(real_names) * val_ratio))
-            rng.shuffle(sim_names)
-            rng.shuffle(real_names)
-            val_names = sim_names[:sim_val_n] + real_names[:real_val_n]
-            train_names = sim_names[sim_val_n:] + real_names[real_val_n:]
+            val_names   = []
+            train_names = []
+            for names in names_per_file:
+                rng.shuffle(names)
+                n_val = max(1, int(len(names) * val_ratio))
+                val_names   += names[:n_val]
+                train_names += names[n_val:]
             rng.shuffle(train_names)
 
             mg = fout.create_group("mask")
@@ -197,42 +189,60 @@ def merge(sim_path: Path, real_path: Path, out_path: Path,
             mg.create_dataset("valid", data=np.array(val_names,   dtype="S"))
 
         print(f"\n{'='*60}")
-        print(f"Written : {out_path}")
-        print(f"Total demos : {idx} ({len(sim_names)} sim + {len(real_names)} real)")
-        print(f"Total steps : {total_steps}")
-        print(f"Train / val : {len(train_names)} / {len(val_names)}")
-        print(f"Obs keys : {sorted(target_keys)}")
+        print(f"Written      : {out_path}")
+        print(f"Total demos  : {idx}")
+        print(f"Total steps  : {total_steps}")
+        print(f"Train / val  : {len(train_names)} / {len(val_names)}")
+        print(f"Obs keys     : {sorted(target_keys)}")
         print(f"{'='*60}\n")
+
+    finally:
+        for f in open_files:
+            f.close()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Merge sim and real HDF5 demo files for robomimic training."
+        description="Merge robomimic HDF5 demo files for training."
     )
-    parser.add_argument("--sim",       required=True,
-                        help="Path to simulation demos")
-    parser.add_argument("--real",      required=True,
-                        help="Path to real-robot demos")
+    # New multi-file interface
+    parser.add_argument("--inputs", nargs="+",
+                        help="Two or more HDF5 files to merge")
+    # Legacy two-file interface
+    parser.add_argument("--sim",  help="(legacy) Path to simulation demos")
+    parser.add_argument("--real", help="(legacy) Path to real-robot demos")
+
     parser.add_argument("--out",       required=True,
                         help="Output path for merged file")
     parser.add_argument("--val-ratio", type=float, default=0.1,
                         help="Fraction of demos for validation (default 0.1)")
     parser.add_argument("--keep-all",  action="store_true",
-                        help="Keep all obs keys, zero-padding missing ones (default: intersection only)")
+                        help="Keep all obs keys, zero-padding missing ones")
     parser.add_argument("--dry-run",   action="store_true",
                         help="Print what would happen without writing anything")
     parser.add_argument("--seed",      type=int, default=1,
                         help="Random seed for train/val shuffle")
     args = parser.parse_args()
 
+    # Resolve input paths
+    if args.inputs:
+        input_paths = [Path(p) for p in args.inputs]
+    elif args.sim and args.real:
+        input_paths = [Path(args.sim), Path(args.real)]
+    else:
+        parser.error("Provide either --inputs (one or more files) or both --sim and --real.")
+
+    for p in input_paths:
+        if not p.exists():
+            parser.error(f"File not found: {p}")
+
     merge(
-        sim_path  = Path(args.sim),
-        real_path = Path(args.real),
-        out_path  = Path(args.out),
-        val_ratio = args.val_ratio,
-        keep_all  = args.keep_all,
-        dry_run   = args.dry_run,
-        seed      = args.seed,
+        input_paths = input_paths,
+        out_path    = Path(args.out),
+        val_ratio   = args.val_ratio,
+        keep_all    = args.keep_all,
+        dry_run     = args.dry_run,
+        seed        = args.seed,
     )
 
 

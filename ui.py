@@ -139,13 +139,32 @@ def task_to_env(task_name: str) -> str:
 def find_latest_demo(task_name: str):
     """
     Return Path to the most recently modified demo.hdf5 inside data/{task_name}/.
+    Excludes the merged folder.
     Returns None if nothing found.
     """
     pattern = str(DEMOS_DIR / task_name / "**" / "demo.hdf5")
-    matches = glob.glob(pattern, recursive=True)
+    matches = [
+        p for p in glob.glob(pattern, recursive=True)
+        if "merged" not in Path(p).parts
+    ]
     if not matches:
         return None
     return Path(max(matches, key=os.path.getmtime))
+
+
+def find_all_hdf5(task_name: str) -> list[Path]:
+    """
+    Return all .hdf5 files for a task (obs.hdf5, merged files, etc).
+    Sorted by modification time, newest first.
+    """
+    pattern = str(DEMOS_DIR / task_name / "**" / "*.hdf5")
+    matches = glob.glob(pattern, recursive=True)
+    return sorted([Path(p) for p in matches], key=os.path.getmtime, reverse=True)
+
+
+def get_merged_path(task_name: str) -> Path:
+    """Return the canonical path for the merged demo file."""
+    return DEMOS_DIR / task_name / "merged" / "merged.hdf5"
 
 
 def launch_sim_collection(task_name: str, env_name: str):
@@ -487,12 +506,10 @@ def main():
                     # Auto-detect or show current
                     latest_demo = find_latest_demo(task_name)
                     if latest_demo:
-                        rel = latest_demo.relative_to(Path(__file__).parent) \
-                              if latest_demo.is_absolute() else latest_demo
-                        st.markdown(f"**Found:** `{latest_demo}`")
+                        st.markdown(f"**Latest batch:** `{latest_demo}`")
                         obs_ready = (latest_demo.parent / "obs.hdf5").exists()
                         if obs_ready:
-                            st.success("obs.hdf5 already exists for this demo.")
+                            st.success("obs.hdf5 already exists for this batch.")
                     else:
                         st.warning("No demo.hdf5 found in this task's data folder yet.")
 
@@ -508,6 +525,50 @@ def main():
 
                     if st.session_state.sim_processing:
                         st.info("Post-processing in progress - check the Log tab.")
+
+                    st.divider()
+
+                    # Merge demos
+                    st.subheader("Merge Demo Batches")
+
+                    all_obs = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
+                    merged_path = get_merged_path(task_name)
+
+                    if merged_path.exists():
+                        st.info(f"Existing merged file: `{merged_path}` — new batches will be merged into it.")
+
+                    if len(all_obs) == 0:
+                        st.warning("No obs.hdf5 files found. Process demos first.")
+                    elif len(all_obs) == 1 and not merged_path.exists():
+                        st.info("Only one batch found. Collect more demos to merge.")
+                    else:
+                        st.markdown(f"Found **{len(all_obs)}** processed batch(es).")
+                        if st.button("🔀 Merge All Batches", key="btn_merge_sim", type="secondary"):
+                            merged_path.parent.mkdir(parents=True, exist_ok=True)
+                            # Build merge command: merge all obs.hdf5 files together.
+                            # If merged already exists, include it as the starting point.
+                            sources = list(all_obs)
+                            if merged_path.exists() and merged_path not in sources:
+                                sources.append(merged_path)
+
+                            merge_script = str(Path(__file__).parent / "merge_demos.py")
+                            # Chain: merge first two, then merge result with next, etc.
+                            # Simpler: pass all obs files + existing merged to a temp merged, then replace.
+                            tmp_merged = str(merged_path.parent / "merged_tmp.hdf5")
+                            src_args = " ".join(f'"{str(s)}"' for s in sources)
+                            bash_cmd = (
+                                f"python {merge_script} "
+                                f"--inputs {src_args} "
+                                f"--out \"{str(merged_path)}\" && "
+                                f"echo '' && echo '--- Merge complete! ---' || "
+                                f"echo '' && echo '--- Merge FAILED. ---'; "
+                                f"echo 'Press Enter to close...'; read"
+                            )
+                            subprocess.Popen(
+                                ["gnome-terminal", "--", "bash", "-c", bash_cmd],
+                                cwd=str(Path(__file__).parent)
+                            )
+                            log(f"Merging {len(sources)} files into {merged_path}")
 
                 with col_preview:
                     st.subheader("Environment Preview")
@@ -527,6 +588,19 @@ def main():
                 st.warning(f"Only {n_demos} demos. Recommend at least 20 before training.")
 
             st.subheader("Local training")
+
+            # Dataset picker - any .hdf5 in the task folder
+            available_hdf5 = find_all_hdf5(st.session_state.current_task)
+            # Filter to files that look like processed obs files (not raw demo.hdf5)
+            trainable = [p for p in available_hdf5 if p.name != "demo.hdf5"]
+            if trainable:
+                hdf5_labels = [str(p.relative_to(DEMOS_DIR)) for p in trainable]
+                selected_label = st.selectbox("Dataset to train on", hdf5_labels, index=0)
+                dataset_path = DEMOS_DIR / selected_label
+            else:
+                st.warning("No processed .hdf5 files found. Run Post-process first.")
+                dataset_path = None
+
             col1, col2 = st.columns(2)
             with col1:
                 n_epochs = st.number_input("Epochs", value=500, min_value=100, step=100)
@@ -535,10 +609,9 @@ def main():
 
             if st.button(
                 "⚙ Train locally",
-                disabled=st.session_state.training or n_demos == 0,
+                disabled=st.session_state.training or n_demos == 0 or dataset_path is None,
                 type="primary",
             ):
-                dataset_path = DEMOS_DIR / st.session_state.current_task / "demos.hdf5"
                 output_dir   = MODELS_DIR / st.session_state.current_task
                 config_path = CONFIG_DIR / st.session_state.current_task / "bc_rnn.json"
 
