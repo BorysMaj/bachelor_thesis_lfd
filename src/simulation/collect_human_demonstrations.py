@@ -118,7 +118,14 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
         env.render()
 
         # Break after stepping if demo was confirmed
+        # Also write marker here in case confirmation arrived during env.step()
         if getattr(device, "_demo_confirmed", False):
+            if hasattr(env, "ep_directory") and env.ep_directory is not None:
+                confirmed_path = os.path.join(env.ep_directory, "confirmed")
+                if not os.path.exists(confirmed_path):
+                    print("Demo confirmed as successful! Saving")
+                    with open(confirmed_path, "w") as marker:
+                        marker.write("1")
             break
 
         # Also break if we complete the task
@@ -195,16 +202,17 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
             states.extend(dic["states"])
             for ai in dic["action_infos"]:
                 actions.append(ai["actions"])
+            success = success or dic["successful"]
+
+        if len(states) == 0:
+            continue
 
         # Success is determined by either:
         # 1. The env's own _check_success() — works for Lift, Push, Reach, etc.
         # 2. A "confirmed" marker file written when user pressed 'e' or both
-        # SpaceMouse buttons — used for UserStudyEnv which has no auto-success.
         confirmed_path = os.path.join(directory, ep_directory, "confirmed")
-        success = success or os.path.exists(confirmed_path) or dic["successful"]
+        success = success or os.path.exists(confirmed_path)
 
-        if len(states) == 0:
-            continue
 
         # Add only the successful demonstration to dataset
         if success:
@@ -237,7 +245,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
     grp.attrs["time"] = "{}:{}:{}".format(now.hour, now.minute, now.second)
     grp.attrs["repository_version"] = suite.__version__
     grp.attrs["env"] = env_name
-    grp.attrs["env_info"] = env_info
+    grp.attrs["env_args"] = env_info
 
     f.close()
 
@@ -366,8 +374,17 @@ if __name__ == "__main__":
     # Wrap this with visualization wrapper
     env = VisualizationWrapper(env)
 
-    # Grab reference to controller config and convert it to json-encoded string
-    env_info = json.dumps(config)
+    # Grab reference to controller config and convert it to json-encoded string.
+    # Must match the format robomimic expects: env_name, type (1 = robosuite), env_kwargs.
+    env_args = {
+        "env_name": config["env_name"],
+        "type": 1,  # robomimic EnvType.ROBOSUITE_TYPE
+        "env_kwargs": {
+            "robots": config["robots"],
+            "controller_configs": config["controller_configs"],
+        },
+    }
+    env_info = json.dumps(env_args)
 
     # wrap the environment with data collection wrapper
     tmp_directory = "/tmp/{}".format(str(time.time()).replace(".", "_"))

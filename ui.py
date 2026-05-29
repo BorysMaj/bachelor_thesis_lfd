@@ -500,7 +500,7 @@ def main():
                         disabled=st.session_state.sim_processing or latest_demo is None,
                         key="btn_process_sim",
                     ):
-                        run_in_thread(process_sim_demos, latest_demo)
+                        process_sim_demos(latest_demo)
                         log("Post-processing started")
                         st.rerun()
 
