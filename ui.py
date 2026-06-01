@@ -513,15 +513,20 @@ def main():
                     else:
                         st.warning("No demo.hdf5 found in this task's data folder yet.")
 
-                    if st.button(
-                        "⚙ Process Demos  (states → obs + train/val split)",
-                        type="secondary",
-                        disabled=st.session_state.sim_processing or latest_demo is None,
-                        key="btn_process_sim",
-                    ):
-                        process_sim_demos(latest_demo)
-                        log("Post-processing started")
-                        st.rerun()
+                    col_proc, col_refresh = st.columns([3, 1])
+                    with col_proc:
+                        if st.button(
+                            "⚙ Process Demos  (states → obs + train/val split)",
+                            type="secondary",
+                            disabled=st.session_state.sim_processing or latest_demo is None,
+                            key="btn_process_sim",
+                        ):
+                            process_sim_demos(latest_demo)
+                            log("Post-processing started")
+                            st.rerun()
+                    with col_refresh:
+                        if st.button("🔄 Refresh", key="btn_refresh_obs", help="Check if processing finished and update the merge file list"):
+                            st.rerun()
 
                     if st.session_state.sim_processing:
                         st.info("Post-processing in progress - check the Log tab.")
