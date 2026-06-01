@@ -136,6 +136,36 @@ def task_to_env(task_name: str) -> str:
     return TASK_TO_ENV.get(key, "Sandbox")
 
 
+BASE_CONFIG_PATH = Path(__file__).parent / "src/learning/train_bc_rnn.json"
+
+
+def generate_train_config(task_name: str, dataset_path: Path,
+                          n_epochs: int, batch_size: int) -> Path:
+    """
+    Read the base train_bc_rnn.json, patch the fields that change per run,
+    and write the result to config/<task_name>/bc_rnn.json.
+    Returns the path to the generated config.
+    """
+    import json as _json
+
+    with open(BASE_CONFIG_PATH, "r") as f:
+        cfg = _json.load(f)
+
+    output_dir = str((MODELS_DIR / task_name).resolve())
+
+    cfg["train"]["data"]       = [{"path": str(dataset_path.resolve())}]
+    cfg["train"]["output_dir"] = output_dir
+    cfg["train"]["num_epochs"] = int(n_epochs)
+    cfg["train"]["batch_size"] = int(batch_size)
+
+    out_path = CONFIG_DIR / task_name / "bc_rnn.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        _json.dump(cfg, f, indent=4)
+
+    return out_path
+
+
 def find_latest_demo(task_name: str):
     """
     Return Path to the most recently modified demo.hdf5 inside data/{task_name}/.
@@ -622,15 +652,18 @@ def main():
                 disabled=st.session_state.training or n_demos == 0 or dataset_path is None,
                 type="primary",
             ):
-                output_dir   = MODELS_DIR / st.session_state.current_task
-                config_path = CONFIG_DIR / st.session_state.current_task / "bc_rnn.json"
+                config_path = generate_train_config(
+                    task_name=st.session_state.current_task,
+                    dataset_path=dataset_path,
+                    n_epochs=n_epochs,
+                    batch_size=batch_size,
+                )
+                log(f"Config written to {config_path}")
 
                 def train():
                     cmd = [
                         "python", "-m", "robomimic.scripts.train",
                         "--config", str(config_path),
-                        "--dataset", str(dataset_path),
-                        "--output_dir", str(output_dir),
                     ]
                     cmd_str = " ".join(cmd)
                     bash_cmd = (
