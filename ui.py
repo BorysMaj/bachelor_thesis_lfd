@@ -534,26 +534,31 @@ def main():
                     all_obs = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
                     merged_path = get_merged_path(task_name)
 
+                    # Only count obs files that are not yet in the merged file
                     if merged_path.exists():
-                        st.info(f"Existing merged file: `{merged_path}` — new batches will be merged into it.")
+                        merged_mtime = merged_path.stat().st_mtime
+                        new_obs = [p for p in all_obs if p.stat().st_mtime > merged_mtime]
+                        st.info(f"Existing merged file found — {len(new_obs)} new batch(es) since last merge.")
+                    else:
+                        new_obs = all_obs
 
                     if len(all_obs) == 0:
                         st.warning("No obs.hdf5 files found. Process demos first.")
-                    elif len(all_obs) == 1 and not merged_path.exists():
+                    elif len(new_obs) == 0:
+                        st.success("Merged file is already up to date.")
+                    elif len(new_obs) == 1 and not merged_path.exists():
                         st.info("Only one batch found. Collect more demos to merge.")
                     else:
-                        st.markdown(f"Found **{len(all_obs)}** processed batch(es).")
+                        st.markdown(f"Found **{len(new_obs)}** new batch(es) to merge.")
                         if st.button("🔀 Merge All Batches", key="btn_merge_sim", type="secondary"):
                             merged_path.parent.mkdir(parents=True, exist_ok=True)
-                            # Build merge command: merge all obs.hdf5 files together.
-                            # If merged already exists, include it as the starting point.
-                            sources = list(all_obs)
-                            if merged_path.exists() and merged_path not in sources:
+                            # Only use new obs files + existing merged (not all obs files)
+                            sources = list(new_obs)
+                            if merged_path.exists():
                                 sources.append(merged_path)
 
                             merge_script = str(Path(__file__).parent / "merge_demos.py")
-                            # Chain: merge first two, then merge result with next, etc.
-                            # Simpler: pass all obs files + existing merged to a temp merged, then replace.
+                            # Pass all obs files + existing merged to a temp merged, then replace.
                             tmp_merged = str(merged_path.parent / "merged_tmp.hdf5")
                             src_args = " ".join(f'"{str(s)}"' for s in sources)
                             bash_cmd = (
