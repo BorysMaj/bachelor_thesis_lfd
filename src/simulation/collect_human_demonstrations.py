@@ -26,7 +26,8 @@ from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 
 
-def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
+def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode,
+                             demo_num=None, target=None):
     """
     Use the device (SpaceMouse) to collect a demonstration.
 
@@ -41,12 +42,24 @@ def collect_human_trajectory(env, device, arm, max_fr, goal_update_mode):
         arm (str): which arm to control 'right' or 'left'
         max_fr (int): if specified, pause the simulation whenever simulation runs faster than max_fr
         goal_update_mode (str): mode to update goal in
+        demo_num (int): current demo number (for display)
+        target (int): target number of demos (for display)
     """
 
     env.reset()
     env.render()
 
-    print("\n New demonstration")
+    # Progress counter
+    if demo_num is not None and target is not None:
+        bar_len = 20
+        filled = int(bar_len * (demo_num - 1) / target)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        print(f"\n{'='*50}")
+        print(f"  Demo {demo_num} / {target}   [{bar}]")
+        print(f"{'='*50}")
+    else:
+        print("\n New demonstration")
+
     print("Perform the task, then press 'e' or both SpaceMouse buttons to confirm.")
     print("Press right SpaceMouse button to discard and reset.\n")
 
@@ -331,6 +344,12 @@ if __name__ == "__main__":
         "If 'achieved', the goal is updated based on the current achieved state. "
         "We recommend using 'achieved' (and input_ref_frame='base') if collecting demonstrations with a mobile base robot.",
     )
+    parser.add_argument(
+        "--target",
+        type=int,
+        default=30,
+        help="Target number of successful demonstrations to collect. Shows a progress counter.",
+    )
     args = parser.parse_args()
 
     # Get controller config
@@ -430,6 +449,25 @@ if __name__ == "__main__":
     os.makedirs(new_dir)
 
     # collect demonstrations
+    successful_demos = 0
     while True:
-        collect_human_trajectory(env, device, args.arm, args.max_fr, args.goal_update_mode)
+        collect_human_trajectory(
+            env, device, args.arm, args.max_fr, args.goal_update_mode,
+            demo_num=successful_demos + 1,
+            target=args.target,
+        )
         gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info)
+
+        # count successful demos from the hdf5
+        import h5py
+        try:
+            with h5py.File(os.path.join(new_dir, "demo.hdf5"), "r") as f:
+                successful_demos = len(f["data"].keys())
+        except Exception:
+            pass
+
+        if successful_demos >= args.target:
+            print(f"\n{'='*50}")
+            print(f"  Target reached! {successful_demos} / {args.target} demos collected.")
+            print(f"  Press Ctrl+C to finish.")
+            print(f"{'='*50}\n")
