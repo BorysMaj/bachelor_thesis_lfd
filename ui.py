@@ -126,6 +126,25 @@ def get_models(task: str):
     pattern = str(MODELS_DIR / task / "**" / "*.pth")
     return sorted(glob.glob(pattern, recursive=True))
 
+
+def find_latest_checkpoint(task: str) -> Path | None:
+    """Return path to last.pth for the most recently modified training run, or None."""
+    pattern = str(MODELS_DIR / task / "**" / "last.pth")
+    matches = glob.glob(pattern, recursive=True)
+    if not matches:
+        return None
+    return Path(max(matches, key=os.path.getmtime))
+
+
+def get_epoch_from_checkpoint(ckpt_path: Path) -> int | None:
+    """Read the last completed epoch number from a robomimic checkpoint."""
+    try:
+        import torch as _torch
+        ckpt = _torch.load(str(ckpt_path), map_location="cpu")
+        return int(ckpt["variable_state"]["epoch"])
+    except Exception:
+        return None
+
 def run_in_thread(fn, *args):
     t = threading.Thread(target=fn, args=args, daemon=True)
     t.start()
@@ -140,10 +159,16 @@ BASE_CONFIG_PATH = Path(__file__).parent / "src/learning/train_bc_rnn.json"
 
 
 def generate_train_config(task_name: str, dataset_path: Path,
-                          n_epochs: int, batch_size: int) -> Path:
+                          n_epochs: int, batch_size: int,
+                          resume_from_epoch: int | None = None) -> Path:
     """
     Read the base train_bc_rnn.json, patch the fields that change per run,
     and write the result to config/<task_name>/bc_rnn.json.
+
+    If resume_from_epoch is provided, num_epochs is set to
+    resume_from_epoch + n_epochs so --resume continues for exactly
+    n_epochs more steps.
+
     Returns the path to the generated config.
     """
     import json as _json
@@ -155,8 +180,12 @@ def generate_train_config(task_name: str, dataset_path: Path,
 
     cfg["train"]["data"]       = [{"path": str(dataset_path.resolve())}]
     cfg["train"]["output_dir"] = output_dir
-    cfg["train"]["num_epochs"] = int(n_epochs)
     cfg["train"]["batch_size"] = int(batch_size)
+
+    if resume_from_epoch is not None:
+        cfg["train"]["num_epochs"] = int(resume_from_epoch) + int(n_epochs)
+    else:
+        cfg["train"]["num_epochs"] = int(n_epochs)
 
     out_path = CONFIG_DIR / task_name / "bc_rnn.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -641,14 +670,32 @@ def main():
                 st.warning("No processed .hdf5 files found. Run Post-process first.")
                 dataset_path = None
 
+            # Check for existing checkpoint
+            last_ckpt = find_latest_checkpoint(st.session_state.current_task)
+            last_epoch = get_epoch_from_checkpoint(last_ckpt) if last_ckpt else None
+            is_resume = last_epoch is not None
+
+            if is_resume:
+                st.info(
+                    f"**Continued training** - an existing model was found "
+                    f"(trained up to epoch {last_epoch}). "
+                    f"Training will resume from epoch {last_epoch + 1} and run for the "
+                    f"number of additional epochs you set below."
+                )
+
             col1, col2 = st.columns(2)
             with col1:
-                n_epochs = st.number_input("Epochs", value=500, min_value=100, step=100)
+                epoch_label = "Additional epochs" if is_resume else "Epochs"
+                n_epochs = st.number_input(epoch_label, value=100 if is_resume else 500, min_value=10, step=50)
             with col2:
                 batch_size = st.number_input("Batch size", value=16, min_value=8)
 
+            if is_resume:
+                st.caption(f"Total epochs after training: **{last_epoch + n_epochs}**")
+
+            btn_label = "⚙ Continue Training" if is_resume else "⚙ Train locally"
             if st.button(
-                "⚙ Train locally",
+                btn_label,
                 disabled=st.session_state.training or n_demos == 0 or dataset_path is None,
                 type="primary",
             ):
@@ -657,6 +704,7 @@ def main():
                     dataset_path=dataset_path,
                     n_epochs=n_epochs,
                     batch_size=batch_size,
+                    resume_from_epoch=last_epoch,
                 )
                 log(f"Config written to {config_path}")
 
@@ -665,6 +713,8 @@ def main():
                         "python", "-m", "robomimic.scripts.train",
                         "--config", str(config_path),
                     ]
+                    if is_resume:
+                        cmd.append("--resume")
                     cmd_str = " ".join(cmd)
                     bash_cmd = (
                         f"{cmd_str} && echo '' && echo '--- Training complete! ---' || "
@@ -676,7 +726,8 @@ def main():
                         ["gnome-terminal", "--", "bash", "-c", bash_cmd],
                         cwd=str(Path(__file__).parent)
                     )
-                    log(f"Training started in a new terminal - {n_epochs} epochs")
+                    extra = f"(continuing from epoch {last_epoch})" if is_resume else ""
+                    log(f"Training started in a new terminal - {n_epochs} epochs {extra}")
                     st.session_state.training = False
 
                 train()
