@@ -1,13 +1,18 @@
 """
 Custom robosuite environment: Sandbox
 Multi-object environment for the user study.
-Users choose their own task from 4 objects.
+Users choose their own task from 6 objects.
 
-Objects (fixed positions):
-    - Red cube      (BoxObject)      -- left
-    - Blue cylinder (CylinderObject) -- front-left
-    - Can           (CanObject)      -- front-right
-    - Green ball    (BallObject)     -- right
+Objects:
+    - Red cube          (BoxObject)
+    - Blue cylinder     (CylinderObject)
+    - Can               (CanObject)
+    - Bin               (BinObject)
+    - Hollow cylinder   (HollowCylinderObject)
+    - Hammer            (HammerObject)
+
+6 predefined positions in a half-circle in front of the robot.
+On each reset the objects are randomly assigned to these positions.
 
 No reward, no success criterion.
 """
@@ -16,11 +21,25 @@ import numpy as np
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BoxObject
-from robosuite.models.objects.primitive import CylinderObject, BallObject
+from robosuite.models.objects.primitive import CylinderObject
 from robosuite.models.objects.xml_objects import CanObject
+from robosuite.models.objects.composite.bin import Bin as BinObject
+from robosuite.models.objects.composite.hollow_cylinder import HollowCylinderObject
+from robosuite.models.objects.composite.hammer import HammerObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.observables import Observable, sensor
 from robosuite.environments.base import register_env
+
+
+# 6 positions in a half-circle, all reachable from the robot base.
+_HALF_CIRCLE_POSITIONS = [
+    np.array([ 0.00,  0.25, 0.02]),   # slot 0 — far left
+    np.array([ 0.15,  0.20, 0.02]),   # slot 1 — left
+    np.array([ 0.25,  0.08, 0.02]),   # slot 2 — centre-left
+    np.array([ 0.25, -0.08, 0.02]),   # slot 3 — centre-right
+    np.array([ 0.15, -0.20, 0.02]),   # slot 4 — right
+    np.array([ 0.00, -0.25, 0.02]),   # slot 5 — far right
+]
 
 
 @register_env
@@ -28,17 +47,20 @@ class Sandbox(ManipulationEnv):
     """
     Multi-object environment for user study demo collection.
 
-    Four objects are placed in front of the robot arm,
-    making them all easily reachable and visible.
+    Six objects are placed in a half-circle in front of the robot.
+    On every reset the objects are randomly shuffled across the 6 slots
+    so each demonstration sees a different layout.
 
     Observations (state-based, no camera):
-        robot0_eef_pos       (3,)  end-effector position
-        robot0_eef_quat      (4,)  end-effector orientation
-        robot0_gripper_qpos  (2,)  gripper finger positions
-        cube_pos             (3,)  red cube position
-        cylinder_pos         (3,)  blue cylinder position
-        can_pos              (3,)  can position
-        ball_pos             (3,)  green ball position
+        robot0_eef_pos          (3,)
+        robot0_eef_quat         (4,)
+        robot0_gripper_qpos     (2,)
+        cube_pos                (3,)
+        cylinder_pos            (3,)
+        can_pos                 (3,)
+        bin_pos                 (3,)
+        hollow_cylinder_pos     (3,)
+        hammer_pos              (3,)
     """
 
     def __init__(
@@ -81,16 +103,6 @@ class Sandbox(ManipulationEnv):
         self.reward_shaping  = reward_shaping
         self.use_object_obs  = use_object_obs
         self.placement_initializer = placement_initializer
-
-        # Fixed positions relative to table_offset.
-        # Half-circle layout: objects fan out in front of the robot (along +x)
-        # and spread across y-axis so all are easily reachable.
-        self._fixed_positions = {
-            "cube":     np.array([ 0.05,  0.22, 0.02]),   # left
-            "cylinder": np.array([ 0.22,  0.10, 0.02]),   # front-left
-            "can":      np.array([ 0.22, -0.10, 0.02]),   # front-right
-            "ball":     np.array([ 0.05, -0.22, 0.02]),   # right
-        }
 
         super().__init__(
             robots=robots,
@@ -147,7 +159,7 @@ class Sandbox(ManipulationEnv):
             rng=self.rng,
         )
 
-        # Blue cylinder (radius=0.02, half-height=0.05)
+        # Blue cylinder
         self.cylinder = CylinderObject(
             name="cylinder",
             size_min=(0.02, 0.05),
@@ -156,21 +168,31 @@ class Sandbox(ManipulationEnv):
             rng=self.rng,
         )
 
-        # Can (XML object)
+        # Can
         self.can = CanObject(name="can")
 
-        # Green ball (radius=0.025)
-        self.ball = BallObject(
-            name="ball",
-            size_min=(0.025,),
-            size_max=(0.025,),
-            rgba=[0.1, 0.8, 0.1, 1],
-        )
+        # Bin
+        self.bin = BinObject(name="bin")
+
+        # Hollow cylinder
+        self.hollow_cylinder = HollowCylinderObject(name="hollow_cylinder")
+
+        # Hammer — pass rng so handle/head sizes are deterministic per seed
+        self.hammer = HammerObject(name="hammer", rng=self.rng)
+
+        self._all_objects = [
+            self.cube,
+            self.cylinder,
+            self.can,
+            self.bin,
+            self.hollow_cylinder,
+            self.hammer,
+        ]
 
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.cube, self.cylinder, self.can, self.ball],
+            mujoco_objects=self._all_objects,
         )
 
 
@@ -178,24 +200,30 @@ class Sandbox(ManipulationEnv):
 
     def _setup_references(self):
         super()._setup_references()
-        self.cube_body_id     = self.sim.model.body_name2id(self.cube.root_body)
+        self.cube_body_id = self.sim.model.body_name2id(self.cube.root_body)
         self.cylinder_body_id = self.sim.model.body_name2id(self.cylinder.root_body)
-        self.can_body_id      = self.sim.model.body_name2id(self.can.root_body)
-        self.ball_body_id     = self.sim.model.body_name2id(self.ball.root_body)
+        self.can_body_id = self.sim.model.body_name2id(self.can.root_body)
+        self.bin_body_id = self.sim.model.body_name2id(self.bin.root_body)
+        self.hollow_cylinder_body_id = self.sim.model.body_name2id(self.hollow_cylinder.root_body)
+        self.hammer_body_id = self.sim.model.body_name2id(self.hammer.root_body)
 
 
-    # Reset - place all objects at their fixed positions
+    # Reset — shuffle objects across the 6 half-circle slots
 
     def _reset_internal(self):
         super()._reset_internal()
-        for obj, key in [
-            (self.cube, "cube"),
-            (self.cylinder, "cylinder"),
-            (self.can, "can"),
-            (self.ball, "ball"),
-        ]:
-            pos  = self.table_offset + self._fixed_positions[key]
-            quat = np.array([1, 0, 0, 0])  # upright, no rotation
+
+        # Randomly assign each object to one of the 6 slots
+        slot_indices = self.rng.permutation(len(_HALF_CIRCLE_POSITIONS))
+
+        for i, obj in enumerate(self._all_objects):
+            pos = self.table_offset + _HALF_CIRCLE_POSITIONS[slot_indices[i]]
+            # Use the object's own init_quat if defined (e.g. hammer is horizontal),
+            # otherwise use upright identity quaternion (wxyz format).
+            if hasattr(obj, "init_quat"):
+                quat = np.array(obj.init_quat)
+            else:
+                quat = np.array([1, 0, 0, 0])
             self.sim.data.set_joint_qpos(
                 obj.joints[0],
                 np.concatenate([pos, quat])
@@ -208,7 +236,7 @@ class Sandbox(ManipulationEnv):
         return 0.0
 
 
-    # Success - no predefined criterion
+    # Success - user confirms via spacemouse/keyboard
 
     def _check_success(self):
         return False
@@ -235,10 +263,19 @@ class Sandbox(ManipulationEnv):
                 return np.array(self.sim.data.body_xpos[self.can_body_id])
 
             @sensor(modality=modality)
-            def ball_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.ball_body_id])
+            def bin_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.bin_body_id])
 
-            for s in [cube_pos, cylinder_pos, can_pos, ball_pos]:
+            @sensor(modality=modality)
+            def hollow_cylinder_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.hollow_cylinder_body_id])
+
+            @sensor(modality=modality)
+            def hammer_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.hammer_body_id])
+
+            for s in [cube_pos, cylinder_pos, can_pos,
+                      bin_pos, hollow_cylinder_pos, hammer_pos]:
                 observables[s.__name__] = Observable(
                     name=s.__name__,
                     sensor=s,
