@@ -256,32 +256,68 @@ class Sandbox(ManipulationEnv):
         if self.use_object_obs:
             modality = "object"
 
+            # cube
             @sensor(modality=modality)
             def cube_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.cube_body_id])
 
             @sensor(modality=modality)
+            def cube_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.cube_body_id])
+
+            # cylinder
+            @sensor(modality=modality)
             def cylinder_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.cylinder_body_id])
 
+            @sensor(modality=modality)
+            def cylinder_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.cylinder_body_id])
+
+            # can
             @sensor(modality=modality)
             def can_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.can_body_id])
 
             @sensor(modality=modality)
+            def can_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.can_body_id])
+
+            # bin
+            @sensor(modality=modality)
             def bin_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.bin_body_id])
 
+            @sensor(modality=modality)
+            def bin_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.bin_body_id])
+
+            # hollow cylinder
             @sensor(modality=modality)
             def hollow_cylinder_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.hollow_cylinder_body_id])
 
             @sensor(modality=modality)
+            def hollow_cylinder_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.hollow_cylinder_body_id])
+
+            # hammer
+            @sensor(modality=modality)
             def hammer_pos(obs_cache):
                 return np.array(self.sim.data.body_xpos[self.hammer_body_id])
 
-            for s in [cube_pos, cylinder_pos, can_pos,
-                      bin_pos, hollow_cylinder_pos, hammer_pos]:
+            @sensor(modality=modality)
+            def hammer_quat(obs_cache):
+                return np.array(self.sim.data.body_xquat[self.hammer_body_id])
+
+            for s in [
+                cube_pos, cube_quat,
+                cylinder_pos, cylinder_quat,
+                can_pos, can_quat,
+                bin_pos, bin_quat,
+                hollow_cylinder_pos, hollow_cylinder_quat,
+                hammer_pos, hammer_quat,
+            ]:
                 observables[s.__name__] = Observable(
                     name=s.__name__,
                     sensor=s,
