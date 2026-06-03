@@ -10,7 +10,8 @@ venv/
 env/
 .env
 
-# Data and models (too large for git)
+# Data and models
+config/
 data/
 models/
 *.hdf5

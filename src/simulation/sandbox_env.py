@@ -33,12 +33,12 @@ from robosuite.environments.base import register_env
 
 # 6 positions in a half-circle, all reachable from the robot base.
 _HALF_CIRCLE_POSITIONS = [
-    np.array([ 0.00,  0.25, 0.02]),   # slot 0 — far left
-    np.array([ 0.15,  0.20, 0.02]),   # slot 1 — left
-    np.array([ 0.25,  0.08, 0.02]),   # slot 2 — centre-left
-    np.array([ 0.25, -0.08, 0.02]),   # slot 3 — centre-right
-    np.array([ 0.15, -0.20, 0.02]),   # slot 4 — right
-    np.array([ 0.00, -0.25, 0.02]),   # slot 5 — far right
+    np.array([ -0.10,  0.25, 0.02]),   # slot 0 — far left
+    np.array([ 0.05,  0.20, 0.02]),   # slot 1 — left
+    np.array([ 0.15,  0.08, 0.02]),   # slot 2 — centre-left
+    np.array([ 0.15, -0.08, 0.02]),   # slot 3 — centre-right
+    np.array([ 0.05, -0.20, 0.02]),   # slot 4 — right
+    np.array([ -0.10, -0.25, 0.02]),   # slot 5 — far right
 ]
 
 
@@ -172,13 +172,19 @@ class Sandbox(ManipulationEnv):
         self.can = CanObject(name="can")
 
         # Bin
-        self.bin = BinObject(name="bin")
+        self.bin = BinObject(name="bin",
+            bin_size=(0.15, 0.15, 0.075)
+        )
 
         # Hollow cylinder
         self.hollow_cylinder = HollowCylinderObject(name="hollow_cylinder")
 
         # Hammer — pass rng so handle/head sizes are deterministic per seed
-        self.hammer = HammerObject(name="hammer", rng=self.rng)
+        self.hammer = HammerObject(name="hammer",
+            handle_radius=(0.012, 0.012),
+            handle_length=(0.1, 0.1),
+            rng=self.rng
+            )
 
         self._all_objects = [
             self.cube,
