@@ -525,9 +525,9 @@ def main():
                         " 1. Read the how to use SpaceMouse\n"
                         " 2. Press 'Start Collecting Demonstrations' to open simulation\n"
                         " 3. After collection press 'Collection Done' button\n"
-                        " 4. Process the demonstration file in the 'Post-process Demos' section\n"
-                        " 5. After Proccessing is done press the refresh button to check if everything went good\n"
-                        " 6. If you collected demos to an existing task, merge the files in section bellow"
+                        " 4. Process the demonstration file in the 'Process & Merge' section\n"
+                        " - This edits data in the file so its suitable for training.\n"
+                        " - If the system doesn't see your file refresh the tab with the button in top right corner.\n"
                     )
 
                     # Controls instruction
