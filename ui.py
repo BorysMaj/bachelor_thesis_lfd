@@ -574,80 +574,81 @@ def main():
 
                     st.divider()
 
-                    # Post-processing
-                    st.subheader("Post-process Demos")
+                    # Process & Merge (combined)
+                    st.subheader("Process & Merge Demos")
 
-                    # Auto-detect or show current
                     latest_demo = find_latest_demo(task_name)
+                    merged_path = get_merged_path(task_name)
+                    all_obs = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
+
                     if latest_demo:
-                        st.markdown(f"**Latest batch:** `{latest_demo}`")
                         obs_ready = (latest_demo.parent / "obs.hdf5").exists()
                         if obs_ready:
-                            st.success("obs.hdf5 already exists for this batch.")
+                            st.success(f"Latest batch already processed - `obs.hdf5` exists.")
+                        else:
+                            st.markdown(f"**Latest batch:** `{latest_demo}`")
                     else:
                         st.warning("No demo.hdf5 found in this task's data folder yet.")
 
-                    if st.button(
-                        "⚙ Process Demos  (states → obs + train/val split)",
-                        type="secondary",
-                        disabled=st.session_state.sim_processing or latest_demo is None,
-                        key="btn_process_sim",
-                    ):
-                        process_sim_demos(latest_demo)
-                        log("Post-processing started")
-                        st.rerun()
-
-                    if st.session_state.sim_processing:
-                        st.info("Post-processing in progress - check the Log tab.")
-
-                    st.divider()
-
-                    # Merge demos
-                    st.subheader("Merge Demo Batches")
-
-                    all_obs = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
-                    merged_path = get_merged_path(task_name)
-
-                    # Only count obs files that are not yet in the merged file
                     if merged_path.exists():
                         merged_mtime = merged_path.stat().st_mtime
                         new_obs = [p for p in all_obs if p.stat().st_mtime > merged_mtime]
-                        st.info(f"Existing merged file found — {len(new_obs)} new batch(es) since last merge.")
+                        st.info(f"Merged file exists - {len(new_obs)} unmerged batch(es) found.")
                     else:
                         new_obs = all_obs
 
-                    if len(all_obs) == 0:
-                        st.warning("No obs.hdf5 files found. Process demos first.")
-                    elif len(new_obs) == 0:
-                        st.success("Merged file is already up to date.")
-                    elif len(new_obs) == 1 and not merged_path.exists():
-                        st.info("Only one batch found. Collect more demos to merge.")
-                    else:
-                        st.markdown(f"Found **{len(new_obs)}** new batch(es) to merge.")
-                        if st.button("🔀 Merge All Batches", key="btn_merge_sim", type="secondary"):
-                            merged_path.parent.mkdir(parents=True, exist_ok=True)
-                            # Only use new obs files + existing merged (not all obs files)
-                            sources = list(new_obs)
-                            if merged_path.exists():
-                                sources.append(merged_path)
+                    if st.button(
+                        "⚙ Process & Merge",
+                        type="primary",
+                        disabled=latest_demo is None,
+                        key="btn_process_merge",
+                    ):
+                        merged_path.parent.mkdir(parents=True, exist_ok=True)
+                        obs_path = latest_demo.parent / "obs.hdf5"
+                        merge_script = str(Path(__file__).parent / "merge_demos.py")
 
-                            merge_script = str(Path(__file__).parent / "merge_demos.py")
-                            # Pass all obs files + existing merged to a temp merged, then replace.
-                            tmp_merged = str(merged_path.parent / "merged_tmp.hdf5")
-                            src_args = " ".join(f'"{str(s)}"' for s in sources)
-                            bash_cmd = (
-                                f"python {merge_script} "
-                                f"--inputs {src_args} "
-                                f"--out \"{str(merged_path)}\" && "
-                                f"echo '' && echo '--- Merge complete! ---' || "
-                                f"echo '' && echo '--- Merge FAILED. ---'; "
-                                f"echo 'Press Enter to close...'; read"
-                            )
-                            subprocess.Popen(
-                                ["gnome-terminal", "--", "bash", "-c", bash_cmd],
-                                cwd=str(Path(__file__).parent)
-                            )
-                            log(f"Merging {len(sources)} files into {merged_path}")
+                        # Step 1: process latest demo.hdf5 → obs.hdf5
+                        cmd1 = " ".join([
+                            "python", "-m", "robomimic.scripts.dataset_states_to_obs",
+                            "--dataset", str(latest_demo),
+                            "--output_name", "obs.hdf5",
+                            "--done_mode", "0",
+                        ])
+                        cmd2 = " ".join([
+                            "python", "-m", "robomimic.scripts.split_train_val",
+                            "--dataset", str(obs_path),
+                            "--ratio", "0.1",
+                        ])
+
+                        # Step 2: merge all obs files + existing merged if present
+                        sources = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
+                        # include the just-processed file even if not on disk yet
+                        if obs_path not in sources:
+                            sources.append(obs_path)
+                        if merged_path.exists():
+                            sources.append(merged_path)
+                        src_args = " ".join(f'"{str(s)}"' for s in sources)
+                        cmd3 = f"python {merge_script} --inputs {src_args} --out \"{str(merged_path)}\""
+
+                        bash_cmd = (
+                            f"{cmd1} && {cmd2} && {cmd3} && "
+                            f"echo '' && echo '--- Done! merged.hdf5 is ready for training. ---' || "
+                            f"echo '' && echo '--- FAILED. Check errors above. ---'; "
+                            f"echo 'Press Enter to close...'; read"
+                        )
+                        subprocess.Popen(
+                            ["gnome-terminal", "--", "bash", "-c", bash_cmd],
+                            cwd=str(Path(__file__).parent)
+                        )
+                        log("Process & Merge started in a new terminal.")
+                        st.rerun()
+
+                    st.caption(
+                        "**What this does:** converts raw simulation states to observations (obs.hdf5), "
+                        "splits into train/val sets, then if multiple demo files exist merges all batches into a single file. "
+                        f"The merged file is saved to `data/{task_name}/merged/merged.hdf5` - "
+                        "use this file for training."
+                    )
 
                 with col_preview:
                     st.subheader("Environment Preview")
