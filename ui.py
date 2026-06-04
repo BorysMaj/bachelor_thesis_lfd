@@ -57,7 +57,7 @@ def init_state():
         "training":            False,
         "executing":           False,
         "current_task":        None,
-        "mode":                "Real Robot",   # Real Robot or Simulation
+        "mode":                "Simulation",   # Real Robot or Simulation
         "log":                 [],
         "recorder":            None,
         "sim_collecting":      False,   # True while collection terminal is open
@@ -344,8 +344,8 @@ def main():
         st.header("Mode")
         mode = st.radio(
             "Environment",
-            ["Real Robot", "Simulation"],
-            index=0 if st.session_state.mode == "Real Robot" else 1,
+            ["Simulation", "Real Robot"],
+            index=1 if st.session_state.mode == "Real Robot" else 0,
             horizontal=True,
             label_visibility="collapsed",
         )
