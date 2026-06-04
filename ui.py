@@ -514,8 +514,17 @@ def main():
                 with col_info:
                     st.subheader("Collect in Simulation")
 
+                    # Step by step instruction
+                    st.success("**Step by step instruction for collection**\n"
+                        " 1. Read the how to use SpaceMouse\n"
+                        " 2. Press 'Start Collecting Demonstrations' to open simulation\n"
+                        " 3. After collection press 'Collection Done' button\n"
+                        " 4. Process the demonstration file in the 'Post-process Demos' section\n"
+                        " 5. After Proccessing is done press the refresh button to check if everything went good\n"
+                        " 6. If you collected demos to an existing task, merge the files in section bellow"
+                    )
 
-                    # Controls reminder
+                    # Controls instruction
                     with st.expander("SpaceMouse controls", expanded=False):
                         st.markdown(
                             "- **Move / tilt** → move end-effector\n"
@@ -527,7 +536,7 @@ def main():
                         )
 
                     if st.button(
-                        "▶ Launch Simulation Collection",
+                        "▶ Start Collecting Demonstrations",
                         type="primary",
                         disabled=st.session_state.sim_collecting,
                         key="btn_launch_sim",
@@ -544,9 +553,9 @@ def main():
                     if st.session_state.sim_collecting:
                         st.info(
                             "🟢 Collection terminal and simulation window is open.\n\n"
-                            "When you're done, come back here and click **Mark Collection Done**."
+                            "When you're done, come back here and click **Collection Done**."
                         )
-                        if st.button("✓ Mark Collection Done", key="btn_done_sim"):
+                        if st.button("✓ Collection Done", key="btn_done_sim"):
                             st.session_state.sim_collecting = False
                             # Auto-detect the latest demo.hdf5
                             latest = find_latest_demo(task_name)
@@ -647,6 +656,15 @@ def main():
     with tab_train:
         st.header("Train Policy")
 
+        st.success("**How to train a policy**\n"
+                        " 1. If you already have recorded demonstrations choose which file you want to train on.\n"
+                        " 2. Choose the hyperparameters.\n"
+                        " - Epochs - how many times the model trains through your demos. More = longer training but better learning. Start with 500.\n"
+                        " - Batch size - how many steps the model learns from at once. Keep at 16 unless you get memory issues errors.\n"
+                        " 3. When ready press 'Train Localy'. Training will take at least 10 minutes.\n"
+                        " 4. After training you can see the performance of policy in 'Execute' tab\n"
+                    )
+
         if not st.session_state.current_task:
             st.warning("Select a task first.")
         else:
@@ -688,7 +706,7 @@ def main():
                 epoch_label = "Additional epochs" if is_resume else "Epochs"
                 n_epochs = st.number_input(epoch_label, value=100 if is_resume else 500, min_value=10, step=50)
             with col2:
-                batch_size = st.number_input("Batch size", value=16, min_value=8)
+                batch_size = st.number_input("Batch size", value=16, min_value=8, step=4)
 
             if is_resume:
                 st.caption(f"Total epochs after training: **{last_epoch + n_epochs}**")
@@ -734,13 +752,6 @@ def main():
                 st.rerun()
 
             st.divider()
-            st.subheader("Snellius (remote)")
-            st.code(
-                f"scp {DEMOS_DIR / st.session_state.current_task / 'demos.hdf5'} "
-                f"bmajchrzak@snellius.surf.nl:~/thesis/\n"
-                f"sbatch ~/thesis/train.job",
-                language="bash",
-            )
 
             models = get_models(st.session_state.current_task)
             if models:
