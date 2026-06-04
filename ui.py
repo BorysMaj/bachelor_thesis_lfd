@@ -438,7 +438,13 @@ def main():
 
     # RECORD tab 
     with tab_record:
-        st.header("Record Demonstrations")
+        col_header, col_refresh = st.columns([6, 1])
+        with col_header:
+            st.header("Record Demonstrations")
+        with col_refresh:
+            st.write("")
+            if st.button("🔄 Refresh", key="btn_refresh_record"):
+                st.rerun()
 
         if not st.session_state.current_task:
             st.warning("Select or create a task in the sidebar first.")
@@ -581,20 +587,15 @@ def main():
                     else:
                         st.warning("No demo.hdf5 found in this task's data folder yet.")
 
-                    col_proc, col_refresh = st.columns([3, 1])
-                    with col_proc:
-                        if st.button(
-                            "⚙ Process Demos  (states → obs + train/val split)",
-                            type="secondary",
-                            disabled=st.session_state.sim_processing or latest_demo is None,
-                            key="btn_process_sim",
-                        ):
-                            process_sim_demos(latest_demo)
-                            log("Post-processing started")
-                            st.rerun()
-                    with col_refresh:
-                        if st.button("🔄 Refresh", key="btn_refresh_obs", help="Check if processing finished and update the merge file list"):
-                            st.rerun()
+                    if st.button(
+                        "⚙ Process Demos  (states → obs + train/val split)",
+                        type="secondary",
+                        disabled=st.session_state.sim_processing or latest_demo is None,
+                        key="btn_process_sim",
+                    ):
+                        process_sim_demos(latest_demo)
+                        log("Post-processing started")
+                        st.rerun()
 
                     if st.session_state.sim_processing:
                         st.info("Post-processing in progress - check the Log tab.")
@@ -654,7 +655,13 @@ def main():
 
     # TRAIN tab
     with tab_train:
-        st.header("Train Policy")
+        col_header, col_refresh = st.columns([6, 1])
+        with col_header:
+            st.header("Train Policy")
+        with col_refresh:
+            st.write("")
+            if st.button("🔄 Refresh", key="btn_refresh_train"):
+                st.rerun()
 
         st.success("**How to train a policy**\n"
                         " 1. If you already have recorded demonstrations choose which file you want to train on.\n"
@@ -761,7 +768,13 @@ def main():
 
     # EXECUTE tab 
     with tab_execute:
-        st.header("Execute Policy")
+        col_header, col_refresh = st.columns([6, 1])
+        with col_header:
+            st.header("Execute Policy")
+        with col_refresh:
+            st.write("")
+            if st.button("🔄 Refresh", key="btn_refresh_execute"):
+                st.rerun()
 
         st.success("**How to execute a policy**\n"
                         " 1. Choose the model you want to see. Use model with highest number\n"
