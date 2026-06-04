@@ -763,6 +763,14 @@ def main():
     with tab_execute:
         st.header("Execute Policy")
 
+        st.success("**How to execute a policy**\n"
+                        " 1. Choose the model you want to see. Use model with highest number\n"
+                        " 2. Choose the hyperparameters.\n"
+                        " - Horizon - maximum steps the robot gets per attempt. 200 steps = 7 seconds. Match it to how long your demos were.\n"
+                        " - Number of demos executed - how many attempts the policy makes.\n"
+                        " 3. When ready press 'Execute in Simulation'.\n"
+                    )
+
         models = get_models(st.session_state.current_task) if st.session_state.current_task else []
 
         if not models:
