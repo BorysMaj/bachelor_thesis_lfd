@@ -27,11 +27,12 @@ EXECUTE_PATH  = Path(__file__).parent / "src/learning/execute_policy.py"
 
 # Maps UI task names to robosuite env names
 TASK_TO_ENV = {
-    "reach":      "ReachTask",
-    "push":       "PushTask",
-    "lift":       "Lift",
-    "stack":      "Stack",
-    "wave":       "Playground",
+    "reach": "ReachTask",
+    "push": "PushTask",
+    "lift": "Lift",
+    "nut": "Nut",
+    "stack": "Stack",
+    "wave": "Playground",
     "playground": "Playground",
 }
 
@@ -44,6 +45,7 @@ SIM_PREVIEWS = {
     "Reach":  ASSETS_DIR / "sim_reach.png",
     "Push":   ASSETS_DIR / "sim_push.png",
     "Lift":   ASSETS_DIR / "sim_lift.png",
+    "Nut":   ASSETS_DIR / "sim_lift_nut.png",
     "Stack":  ASSETS_DIR / "sim_stack.png",
     "Sandbox":  ASSETS_DIR / "sim_sandbox.png",
 }

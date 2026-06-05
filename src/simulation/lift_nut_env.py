@@ -9,9 +9,10 @@ from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.transform_utils import convert_quat
+from robosuite.environments.base import register_env
 
-
-class LiftNut(ManipulationEnv):
+@register_env
+class Nut(ManipulationEnv):
     """
     Lifting task using a square nut object instead of a cube.
     """
@@ -284,4 +285,4 @@ class LiftNut(ManipulationEnv):
         nut_height   = self.sim.data.body_xpos[self.nut_body_id][2]
         table_height = self.model.mujoco_arena.table_offset[2]
 
-        return nut_height > table_height + 0.04
+        return nut_height > table_height + 0.10
