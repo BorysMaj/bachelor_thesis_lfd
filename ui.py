@@ -13,6 +13,19 @@ import glob
 import json
 from pathlib import Path
 
+# Voice support — imported lazily so missing deps don't break the rest of the UI
+try:
+    from audio_recorder_streamlit import audio_recorder as _audio_recorder
+    VOICE_AVAILABLE = True
+except ImportError:
+    VOICE_AVAILABLE = False
+
+try:
+    from src.voice.voice_handler import VoiceHandler
+    VOICE_HANDLER_AVAILABLE = True
+except ImportError:
+    VOICE_HANDLER_AVAILABLE = False
+
 # Log buffer - background threads write here, main thread drains it
 _log_queue: queue.Queue = queue.Queue()
 
@@ -65,6 +78,11 @@ def init_state():
         "sim_collecting":      False,   # True while collection terminal is open
         "sim_last_demo_path":  None,    # path to most recent demo.hdf5
         "sim_processing":      False,   # True while post-processing runs
+        # Voice
+        "voice_log":        [],   # list of {"role": "user"/"robot", "text": str}
+        "voice_pending":    None, # pending action waiting for user confirmation
+        "voice_handler":    None, # VoiceHandler instance
+        "voice_last_audio": None, # hash of last processed audio — prevents duplicate processing
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -283,9 +301,7 @@ def process_sim_demos(demo_path: Path):
     cmd2_str = " ".join(cmd2)
     bash_cmd = (
         f"{cmd1_str} && {cmd2_str} && "
-        f"echo '' && echo '--- Processing complete! ---' || "
-        f"echo '' && echo '--- Processing FAILED. Check errors above. ---'; "
-        f"echo 'Press Enter to close...'; read"
+        f"echo 'Press Enter to close.'; read"
     )
 
     subprocess.Popen(
@@ -336,6 +352,25 @@ def main():
         page_icon="🤖",
         layout="wide",
     )
+
+    st.markdown("""
+        <style>
+            /* Sidebar text */
+            [data-testid="stSidebar"] * {
+                font-size: 17px !important;
+            }
+            [data-testid="stSidebar"] .stMetric label,
+            [data-testid="stSidebar"] .stMetric div {
+                font-size: 18px !important;
+            }
+
+            /* Tab labels */
+            .stTabs [data-baseweb="tab"] {
+                font-size: 18px !important;
+                padding: 12px 24px !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
     st.title("Robot Learning from Demonstration")
 
@@ -409,11 +444,11 @@ def main():
         tasks = get_tasks()
 
         new_task = st.text_input("New task name")
-        if st.button("Create task") and new_task.strip():
-            task_dir = DEMOS_DIR / new_task.strip()
+        if st.button("Create task") and new_task.replace(" ","_"):
+            task_dir = DEMOS_DIR / new_task.replace(" ","_")
             task_dir.mkdir(parents=True, exist_ok=True)
-            st.session_state.current_task = new_task.strip()
-            log(f"Created task: {new_task.strip()}")
+            st.session_state.current_task = new_task.replace(" ","_")
+            log(f"Created task: {new_task.replace(" ","_")}")
             st.rerun()
 
         if tasks:
@@ -434,8 +469,8 @@ def main():
             st.info("No tasks yet. Create one above.")
 
     # Main tabs 
-    tab_record, tab_train, tab_execute, tab_log = st.tabs(
-        ["⏺ Record", "⚙ Train", "▶ Execute", "📋 Log"]
+    tab_record, tab_train, tab_execute, tab_log, tab_voice = st.tabs(
+        ["⏺ Record", "⚙ Train", "▶ Execute", "📋 Log", "🎤 Voice"]
     )
 
     # RECORD tab 
@@ -563,7 +598,9 @@ def main():
                             "🟢 Collection terminal and simulation window is open.\n\n"
                             "When you're done, come back here and click **Collection Done**."
                         )
-                        if st.button("✓ Collection Done", key="btn_done_sim"):
+
+                        done_clicked = st.button("Collection Done", key="btn_done_sim",help = "Press after completing demos", icon="🚨", icon_position="left")
+                        if done_clicked:
                             st.session_state.sim_collecting = False
                             # Auto-detect the latest demo.hdf5
                             latest = find_latest_demo(task_name)
@@ -634,9 +671,7 @@ def main():
 
                         bash_cmd = (
                             f"{cmd1} && {cmd2} && {cmd3} && "
-                            f"echo '' && echo '--- Done! merged.hdf5 is ready for training. ---' || "
-                            f"echo '' && echo '--- FAILED. Check errors above. ---'; "
-                            f"echo 'Press Enter to close...'; read"
+                            f"echo 'Press Enter to close.'; read"
                         )
                         subprocess.Popen(
                             ["gnome-terminal", "--", "bash", "-c", bash_cmd],
@@ -745,9 +780,8 @@ def main():
                         cmd.append("--resume")
                     cmd_str = " ".join(cmd)
                     bash_cmd = (
-                        f"{cmd_str} && echo '' && echo '--- Training complete! ---' || "
-                        f"echo '' && echo '--- Training FAILED. ---'; "
-                        f"echo 'Press Enter to close...'; read"
+                        f"{cmd_str} &&"
+                        f"echo 'Press Enter to close.'; read"
                     )
 
                     subprocess.Popen(
@@ -803,7 +837,7 @@ def main():
             with col1:
                 horizon = st.number_input("Horizon (steps)", value=400, min_value=50, step=50)
             with col2:
-                num_demos_ex = st.number_input("Number of demos executed", value=10, min_value=1, step=1)
+                num_demos_ex = st.number_input("Number of demos executed", value=5, min_value=1, step=1)
 
             if st.session_state.mode == "Real Robot":
                 st.warning("⚠ Make sure the workspace is clear before running.")
@@ -823,9 +857,8 @@ def main():
                             ]
                             cmd_str = " ".join(cmd)
                             bash_cmd = (
-                                f"{cmd_str} && echo '' && echo '--- Execution complete! ---' || "
-                                f"echo '' && echo '--- Execution FAILED. ---'; "
-                                f"echo 'Press Enter to close...'; read"
+                                f"{cmd_str} &&"
+                                f"echo 'Press Enter to close.'; read"
                             )
 
                             subprocess.Popen(
@@ -858,9 +891,8 @@ def main():
                     ]
                     cmd_str = " ".join(cmd)
                     bash_cmd = (
-                        f"{cmd_str} && echo '' && echo '--- Execution complete! ---' || "
-                        f"echo '' && echo '--- Execution FAILED. ---'; "
-                        f"echo 'Press Enter to close...'; read"
+                        f"{cmd_str} &&"
+                        f"echo 'Press Enter to close.'; read"
                     )
 
                     subprocess.Popen(
@@ -880,6 +912,239 @@ def main():
                 with col_bad:
                     if st.button("👎 Failed"):
                         log("Execution rated: BAD - consider adding more demos")
+
+    # VOICE tab
+    with tab_voice:
+        st.header("Voice Control")
+
+        if not VOICE_AVAILABLE or not VOICE_HANDLER_AVAILABLE:
+            st.error(
+                "Voice dependencies not installed. Run:\n\n"
+                "```\npip install openai-whisper pyttsx3 audio-recorder-streamlit "
+                "\nsudo apt-get install espeak\n```"
+            )
+        else:
+            # Initialise VoiceHandler once per session
+            if st.session_state.voice_handler is None:
+                st.session_state.voice_handler = VoiceHandler(demos_dir=DEMOS_DIR)
+            handler: VoiceHandler = st.session_state.voice_handler
+
+            # Conversation log
+            st.subheader("Conversation")
+
+            col_log, col_clear = st.columns([6, 1])
+            with col_clear:
+                if st.button("🗑 Clear", key="btn_voice_clear"):
+                    st.session_state.voice_log     = []
+                    st.session_state.voice_pending = None
+                    st.rerun()
+
+            log_container = st.container(height=340)
+            with log_container:
+                if not st.session_state.voice_log:
+                    st.caption("No conversation yet. Press the microphone and start speaking.")
+                for entry in st.session_state.voice_log:
+                    role = entry["role"]
+                    content = entry["text"]
+                    if role == "user":
+                        with st.chat_message("user"):
+                            st.markdown(content)
+                    else:
+                        with st.chat_message("assistant", avatar="🤖"):
+                            st.markdown(content)
+
+            st.divider()
+
+            # Pending action banner
+            if st.session_state.voice_pending:
+                pending = st.session_state.voice_pending
+                st.info(
+                    f"⏳ **Waiting for confirmation** — pending action: "
+                    f"`{pending.get('action')}` "
+                    f"for task `{pending.get('task_name') or '—'}`"
+                )
+
+            # Microphone input
+            st.subheader("Speak")
+            st.caption(
+                "Click the microphone to start recording. "
+                "Click again to stop and send."
+            )
+
+            audio_bytes = _audio_recorder(
+                text="",
+                recording_color="#e74c3c",
+                neutral_color="#2ecc71",
+                icon_name="microphone",
+                icon_size="2x",
+                pause_threshold=2.0,
+                key="voice_recorder",
+            )
+
+            if audio_bytes:
+                # Skip if this is the same audio as the last processed recording
+                import hashlib
+                audio_hash = hashlib.md5(audio_bytes).hexdigest()
+                if audio_hash == st.session_state.voice_last_audio:
+                    audio_bytes = None
+
+            if audio_bytes:
+                st.session_state.voice_last_audio = hashlib.md5(audio_bytes).hexdigest()
+                # Transcribe
+                with st.spinner("Transcribing..."):
+                    try:
+                        user_text = handler.transcribe(audio_bytes)
+                    except Exception as e:
+                        st.error(f"Transcription failed: {e}")
+                        user_text = None
+
+                if user_text:
+                    st.session_state.voice_log.append(
+                        {"role": "user", "text": user_text}
+                    )
+                    log(f"[Voice] User: {user_text}")
+
+                    try:
+                        result = handler.process(
+                            user_text=user_text,
+                            pending=st.session_state.voice_pending,
+                        )
+                    except Exception as e:
+                        st.error(f"Processing error: {e}")
+                        result = None
+
+                    if result:
+                        robot_msg = result.get("message", "")
+                        action = result.get("action", "none")
+                        task_name = result.get("task_name")
+                        confirmed = result.get("confirmed", False)
+
+                        # Handle awaiting confirmation 
+                        if result.get("awaiting_confirmation"):
+                            st.session_state.voice_pending = result.get("confirmation_action")
+                        elif confirmed or action != "confirm_yes":
+                            st.session_state.voice_pending = None
+
+                        # Execute action
+                        if action == "create_task":
+                            if task_name:
+                                task_dir = DEMOS_DIR / task_name
+                                task_dir.mkdir(parents=True, exist_ok=True)
+                                st.session_state.current_task = task_name
+                                log(f"[Voice] Created task: {task_name}")
+
+                        elif action == "execute_task":
+                            exec_task = task_name or st.session_state.current_task
+                            if exec_task:
+                                models = get_models(exec_task)
+                                if models:
+                                    latest = models[-1]
+                                    env_name = task_to_env(exec_task)
+                                    cmd = [
+                                        "python", "-m", "robomimic.scripts.run_trained_agent",
+                                        "--agent", latest,
+                                        "--n_rollouts", "3",
+                                        "--horizon", "400",
+                                        "--render",
+                                    ]
+                                    cmd_str   = " ".join(cmd)
+                                    bash_cmd  = (
+                                        f"{cmd_str}; "
+                                        f"echo 'Press Enter to close'; read"
+                                    )
+                                    subprocess.Popen(
+                                        ["gnome-terminal", "--", "bash", "-c", bash_cmd],
+                                        cwd=str(Path(__file__).parent)
+                                    )
+                                    log(f"[Voice] Executing policy for: {exec_task}")
+                                    robot_msg = f"Running the policy for '{exec_task}'. Watch the simulation window."
+                                else:
+                                    robot_msg = f"No trained model found for '{exec_task}'. Record some demos and train first."
+                            else:
+                                robot_msg = "Please tell me which task to execute."
+
+                        elif action == "start_recording":
+                            task = st.session_state.current_task
+                            if task:
+                                env_name = task_to_env(task)
+                                launch_sim_collection(task, env_name)
+                                st.session_state.sim_collecting = True
+                                log(f"[Voice] Started sim collection for: {task}")
+                                robot_msg = (
+                                    f"Starting the simulation for '{task}'. "
+                                    f"Perform the task, then say 'stop recording' or press both SpaceMouse buttons."
+                                )
+                            else:
+                                robot_msg = "Please select or create a task first."
+
+                        elif action == "stop_recording":
+                            st.session_state.sim_collecting = False
+                            latest = find_latest_demo(st.session_state.current_task or "")
+                            if latest:
+                                st.session_state.sim_last_demo_path = str(latest)
+                            log("[Voice] Collection marked as done")
+                            robot_msg = "Recording stopped. Go to the Record tab to process and merge your demos."
+
+                        elif action == "start_training":
+                            task = st.session_state.current_task
+                            if task:
+                                merged = get_merged_path(task)
+                                dataset = merged if merged.exists() else find_latest_demo(task)
+                                if dataset:
+                                    config_path = generate_train_config(
+                                        task_name=task,
+                                        dataset_path=dataset,
+                                        n_epochs=500,
+                                        batch_size=16,
+                                    )
+                                    cmd_str  = f"python -m robomimic.scripts.train --config {config_path}"
+                                    bash_cmd = (
+                                        f"{cmd_str} && echo '--- Training complete! ---' || "
+                                        f"echo '--- Training FAILED. ---'; "
+                                        f"echo 'Press Enter to close...'; read"
+                                    )
+                                    subprocess.Popen(
+                                        ["gnome-terminal", "--", "bash", "-c", bash_cmd],
+                                        cwd=str(Path(__file__).parent)
+                                    )
+                                    log(f"[Voice] Training started for: {task}")
+                                    robot_msg = f"Training started for '{task}'. This will take a while."
+                                else:
+                                    robot_msg = "No demo data found. Record some demonstrations first."
+                            else:
+                                robot_msg = "Please select a task first."
+
+                        elif action == "list_tasks":
+                            tasks = handler.get_available_tasks()
+                            if tasks:
+                                task_list = ", ".join(tasks)
+                                robot_msg = f"I know these tasks: {task_list}."
+                            else:
+                                robot_msg = "No tasks recorded yet."
+
+                        elif action == "go_home":
+                            robot_msg = "Going to home position."
+                            log("[Voice] Go home requested")
+
+                        # Speak and log robot response
+                        st.session_state.voice_log.append(
+                            {"role": "robot", "text": robot_msg}
+                        )
+                        log(f"[Voice] Robot: {robot_msg}")
+                        handler.speak(robot_msg)
+
+                    st.rerun()
+
+            # Quick command reference
+            with st.expander("Voice command examples", expanded=False):
+                st.markdown(
+                    "- *\"I want to teach you a new task called pick up the mug\"*\n"
+                    "- *\"Start recording\"*\n"
+                    "- *\"Stop recording\"* / *\"Done\"*\n"
+                    "- *\"Train the model\"*\n"
+                    "- *\"What tasks do you know?\"*\n"
+                    "- *\"Yes\"* / *\"No\"* — to answer the robot's questions\n"
+                )
 
     # LOG tab
     with tab_log:
