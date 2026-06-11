@@ -448,7 +448,6 @@ def main():
             task_dir = DEMOS_DIR / new_task.replace(" ","_")
             task_dir.mkdir(parents=True, exist_ok=True)
             st.session_state.current_task = new_task.replace(" ","_")
-            log(f"Created task: {new_task.replace(" ","_")}")
             st.rerun()
 
         if tasks:

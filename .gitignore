@@ -10,13 +10,14 @@ venv/
 env/
 .env
 
-# Data and models
+# Data and models (not user study data)
 config/
 data/
 models/
 *.hdf5
 *.pth
 *.pt
+!user_study_data/**/*.hdf5
 
 # Jupyter
 .ipynb_checkpoints/

@@ -347,7 +347,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target",
         type=int,
-        default=30,
+        default=20,
         help="Target number of successful demonstrations to collect. Shows a progress counter.",
     )
     args = parser.parse_args()
