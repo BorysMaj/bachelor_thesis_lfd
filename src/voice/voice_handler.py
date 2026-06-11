@@ -112,8 +112,9 @@ class VoiceHandler:
         if cls._tts_engine is None:
             import pyttsx3
             cls._tts_engine = pyttsx3.init()
-            cls._tts_engine.setProperty("rate", 150)
+            cls._tts_engine.setProperty("rate", 125)
             cls._tts_engine.setProperty("volume", 1.0)
+
         return cls._tts_engine
 
     @classmethod
@@ -126,7 +127,7 @@ class VoiceHandler:
                     engine.say(text)
                     engine.runAndWait()
                 except Exception:
-                    pass  # TTS failure should never crash the UI
+                    pass  # TTS failure doesnt crash the UI
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -204,16 +205,16 @@ class VoiceHandler:
     ) -> dict:
         """
         Parse user_text and return a result dict:
-            message      – response to speak/display
-            action       – action string (matches INTENT_RULES keys or "none")
-            task_name    – extracted snake_case task name or None
-            confirmed    – True if user confirmed a pending action
-            similar_task – name of closest existing task or None
+            message - response to speak/display
+            action - action string (matches INTENT_RULES keys or "none")
+            task_name - extracted snake_case task name or None
+            confirmed - True if user confirmed a pending action
+            similar_task - name of closest existing task or None
         """
-        intent    = self._detect_intent(user_text)
+        intent = self._detect_intent(user_text)
         task_name = None
         confirmed = False
-        message   = ""
+        message = ""
 
         # Handle pending confirmation
         if pending:
@@ -244,11 +245,11 @@ class VoiceHandler:
                         )
                         # Return early — wait for confirmation before acting
                         return {
-                            "message":     message,
-                            "action":      "create_task",
-                            "task_name":   task_name,
-                            "confirmed":   False,
-                            "similar_task": similar,
+                            "message": message,
+                            "action": "create_task",
+                            "task_name": task_name,
+                            "confirmed": False,
+                            "similar_task":similar,
                             "awaiting_confirmation": True,
                             "confirmation_action": {
                                 "action":    "execute_task",
@@ -310,11 +311,11 @@ class VoiceHandler:
         similar = self.find_similar_task(task_name) if task_name else None
 
         return {
-            "message":               message,
-            "action":                intent,
-            "task_name":             task_name,
-            "confirmed":             confirmed,
-            "similar_task":          similar,
+            "message": message,
+            "action": intent,
+            "task_name": task_name,
+            "confirmed": confirmed,
+            "similar_task": similar,
             "awaiting_confirmation": False,
-            "confirmation_action":   None,
+            "confirmation_action": None,
         }

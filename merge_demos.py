@@ -12,8 +12,6 @@ Usage:
     # Keep all obs keys (zero-pad missing ones instead of taking intersection)
     python merge_demos.py --inputs ... --out ... --keep-all
 
-    # Preview what would happen without writing anything
-    python merge_demos.py --inputs ... --out ... --dry-run
 """
 
 import argparse
@@ -49,7 +47,7 @@ def align_obs(src_group, target_keys: set):
 
     extra = src_keys - target_keys
     if extra:
-        warnings.append(f"  INFO: dropping keys not in target set: {sorted(extra)}")
+        warnings.append(f" INFO: dropping keys not in target set: {sorted(extra)}")
 
     return result, warnings
 
@@ -89,7 +87,7 @@ def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
 
 # Main
 def merge(input_paths: list[Path], out_path: Path,
-          val_ratio: float, keep_all: bool, dry_run: bool, seed: int):
+          val_ratio: float, keep_all: bool, seed: int):
 
     print(f"  Merging {len(input_paths)} file(s) → {out_path}")
     for p in input_paths:
@@ -125,10 +123,6 @@ def merge(input_paths: list[Path], out_path: Path,
         if missing_core:
             print(f"\n  WARN: core robot keys missing: {missing_core}")
 
-        if dry_run:
-            total = sum(len(d) for d in all_demo_lists)
-            print(f"\n  [DRY RUN] Would write {total} demos. Nothing written.")
-            return
 
         # Record shapes of each key (for zero-padding when a key is absent)
         key_shapes = {}
@@ -215,15 +209,13 @@ def main():
     parser.add_argument("--sim",  help="(legacy) Path to simulation demos")
     parser.add_argument("--real", help="(legacy) Path to real-robot demos")
 
-    parser.add_argument("--out",       required=True,
+    parser.add_argument("--out", required=True,
                         help="Output path for merged file")
     parser.add_argument("--val-ratio", type=float, default=0.1,
                         help="Fraction of demos for validation (default 0.1)")
-    parser.add_argument("--keep-all",  action="store_true",
+    parser.add_argument("--keep-all", action="store_true",
                         help="Keep all obs keys, zero-padding missing ones")
-    parser.add_argument("--dry-run",   action="store_true",
-                        help="Print what would happen without writing anything")
-    parser.add_argument("--seed",      type=int, default=1,
+    parser.add_argument("--seed", type=int, default=1,
                         help="Random seed for train/val shuffle")
     args = parser.parse_args()
 
@@ -244,7 +236,6 @@ def main():
         out_path    = Path(args.out),
         val_ratio   = args.val_ratio,
         keep_all    = args.keep_all,
-        dry_run     = args.dry_run,
         seed        = args.seed,
     )
 

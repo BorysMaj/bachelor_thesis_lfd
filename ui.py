@@ -599,7 +599,7 @@ def main():
                             "When you're done, come back here and click **Collection Done**."
                         )
 
-                        done_clicked = st.button("Collection Done", key="btn_done_sim",help = "Press after completing demos", icon="🚨", icon_position="left")
+                        done_clicked = st.button("Collection Done", key="btn_done_sim",help = "Press after completing demos", icon="✅", icon_position="left")
                         if done_clicked:
                             st.session_state.sim_collecting = False
                             # Auto-detect the latest demo.hdf5
@@ -877,7 +877,7 @@ def main():
                         log("Execution stopped by user")
 
                 if st.session_state.executing:
-                    st.warning("🟡 Policy running...")
+                    st.warning("🟡 Policy running.")
 
             else:
                 # Simulation execution
@@ -901,17 +901,6 @@ def main():
                     )
                     log("Sim execution started in a new terminal.")
 
-            # Feedback
-            if not st.session_state.executing:
-                st.divider()
-                st.subheader("Rate last execution")
-                col_good, col_bad = st.columns(2)
-                with col_good:
-                    if st.button("👍 Worked", type="primary"):
-                        log("Execution rated: GOOD")
-                with col_bad:
-                    if st.button("👎 Failed"):
-                        log("Execution rated: BAD - consider adding more demos")
 
     # VOICE tab
     with tab_voice:
