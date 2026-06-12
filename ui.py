@@ -887,7 +887,7 @@ def main():
                         "--n_rollouts", str(num_demos_ex),
                         "--horizon", str(horizon),
 #                        "--render",
-                        "--results_path user_study_data/user14_liftnut.csv",
+                        "--results_path user_study_data/user2_push.csv",
                     ]
                     cmd_str = " ".join(cmd)
                     bash_cmd = (
