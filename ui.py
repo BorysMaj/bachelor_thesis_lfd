@@ -886,7 +886,8 @@ def main():
                         "--agent", model_path,
                         "--n_rollouts", str(num_demos_ex),
                         "--horizon", str(horizon),
-                        "--render",
+#                        "--render",
+                        "--results_path user_study_data/user14_liftnut.csv",
                     ]
                     cmd_str = " ".join(cmd)
                     bash_cmd = (

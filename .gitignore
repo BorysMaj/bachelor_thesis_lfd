@@ -14,10 +14,8 @@ env/
 config/
 data/
 models/
-*.hdf5
-*.pth
-*.pt
 !user_study_data/**/*.hdf5
+!user_study_data/**/*.pth
 
 # Jupyter
 .ipynb_checkpoints/
