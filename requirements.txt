@@ -1,5 +1,26 @@
-social-interaction-cloud
+# Core
 torch>=2.0.0
 numpy
-redis
-opencv-python
+scipy
+pandas
+h5py
+imageio
+
+# Simulation & robot learning
+robosuite
+robomimic
+
+# Real robot (optional — only needed for physical Franka Panda deployment)
+panda-py
+pynput
+
+# UI
+streamlit
+
+# Voice (optional — only needed for Voice tab)
+openai-whisper
+pyttsx3
+audio-recorder-streamlit
+
+# Analysis & plotting (only needed to reproduce thesis figures)
+matplotlib

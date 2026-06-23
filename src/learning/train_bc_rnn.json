@@ -42,7 +42,7 @@
             }
         },
         "cuda": false,
-        "batch_size": 32,
+        "batch_size": 16,
         "num_epochs": 500,
         "seed": 1
     },

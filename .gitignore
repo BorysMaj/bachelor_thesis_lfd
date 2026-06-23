@@ -1,33 +1,24 @@
 # Python
 __pycache__/
-*.py[cod]
-*.egg-info/
-*.egg
-.eggs/
 
 # Virtual environments
 venv/
 env/
 .env
 
-# Data and models (not user study data)
+# Data (not user study data)
 config/
 data/
-models/
+*.pth
+*.json
 !user_study_data/**/*.hdf5
-!user_study_data/**/*.pth
 
 # Jupyter
 .ipynb_checkpoints/
-
-# OS
-.DS_Store
-Thumbs.db
 
 # Logs
 *.log
 logs/
 
-# Robomimic outputs
-bc_trained_models/
-tests/tmp_model_dir/
+# Models
+models/
