@@ -60,6 +60,7 @@ The files in `src/simulation/` are modified or new files for the robosuite packa
 
 **Modified scripts** — update `collect_human_demonstrations.py` and `run_trained_agent.py` in:
 /robosuite/robosuite/scripts/
+
 ---
 
 ## User study data
