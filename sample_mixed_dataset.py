@@ -2,7 +2,6 @@
 Sample mixed datasets from multiple users' HDF5 files.
 
 Generates 10 samples (seeds 1-10) for both liftnut and push tasks.
-Run with: python sample_mixed_dataset.py
 """
 
 import random
@@ -13,7 +12,6 @@ import numpy as np
 
 
 MAX_DEMOS_PER_USER = 20
-
 
 def get_demo_names(f, max_demos=MAX_DEMOS_PER_USER):
     """Return up to max_demos demo names from a file, sorted by index."""
@@ -88,28 +86,6 @@ def sample_mixed(data_root, task, out_path, total, seed, val_ratio=0.1):
     open_files = [h5py.File(p, "r") for _, p in input_paths]
 
     try:
-        # Determine obs keys — use intersection so all demos have the same keys
-        all_key_sets = []
-        for f in open_files:
-            demos = get_demo_names(f)
-            if demos:
-                all_key_sets.append(set(f["data"][demos[0]]["obs"].keys()))
-
-        if not all_key_sets:
-            print("ERROR: No demos found in any file.")
-            return
-
-        target_keys = set.intersection(*all_key_sets)
-        print(f"Obs keys: {sorted(target_keys)}")
-
-        # Record shapes for zero-padding if a key is missing in some file
-        key_shapes = {}
-        for f in open_files:
-            for demo_name in get_demo_names(f, 1):
-                for key in target_keys:
-                    if key not in key_shapes and key in f["data"][demo_name]["obs"]:
-                        key_shapes[key] = f["data"][demo_name]["obs"][key].shape[1:]
-
         # Get env_args from first file that has it
         env_args_str = "{}"
         for f in open_files:
@@ -129,12 +105,12 @@ def sample_mixed(data_root, task, out_path, total, seed, val_ratio=0.1):
             dst = fout.create_group("data")
             dst.attrs["env_args"] = env_args_str
 
-            idx         = 0
+            idx = 0
             total_steps = 0
-            all_names   = []
+            all_names = []
 
             for file_idx, (username, _) in enumerate(input_paths):
-                f      = open_files[file_idx]
+                f = open_files[file_idx]
                 n_take = alloc_map[file_idx]
                 available = get_demo_names(f, max_demos=MAX_DEMOS_PER_USER)
 
@@ -153,23 +129,22 @@ def sample_mixed(data_root, task, out_path, total, seed, val_ratio=0.1):
 
             dst.attrs["total"] = total_steps
 
-            # Stratified train/val split
+            # New train/val split
             names_copy = all_names.copy()
             rng.shuffle(names_copy)
-            n_val       = max(1, int(len(names_copy) * val_ratio))
-            val_names   = names_copy[:n_val]
+            n_val = max(1, int(len(names_copy) * val_ratio))
+            val_names = names_copy[:n_val]
             train_names = names_copy[n_val:]
 
             mg = fout.create_group("mask")
             mg.create_dataset("train", data=np.array(train_names, dtype="S"))
-            mg.create_dataset("valid", data=np.array(val_names,   dtype="S"))
+            mg.create_dataset("valid", data=np.array(val_names, dtype="S"))
 
         print(f"\n{'='*60}")
-        print(f"Written    : {out_path}")
+        print(f"Written: {out_path}")
         print(f"Total demos: {idx}")
         print(f"Total steps: {total_steps}")
         print(f"Train / val: {len(train_names)} / {len(val_names)}")
-        print(f"{'='*60}\n")
 
     finally:
         for f in open_files:
@@ -185,9 +160,7 @@ def main():
     for task in TASKS:
         for seed in SEEDS:
             out = f"mixed_datasets/{task}/sample{seed}.hdf5"
-            print(f"\n{'='*60}")
-            print(f"Task={task}  seed={seed}  → {out}")
-            print(f"{'='*60}")
+            print(f"Task={task}, seed={seed}, output={out}")
             sample_mixed(DATA_ROOT, task, out, TOTAL, seed)
 
 if __name__ == "__main__":

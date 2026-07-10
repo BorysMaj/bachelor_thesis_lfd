@@ -5,13 +5,6 @@ Designed to combine simulation demos, real-robot demos, and existing merged file
 Usage:
     # Merge multiple files (any number)
     python merge_demos.py --inputs data/reach/obs1.hdf5 data/reach/obs2.hdf5 --out data/reach/merged/merged.hdf5
-
-    # Legacy two-file interface still works
-    python merge_demos.py --sim data/reach/obs.hdf5 --real data/reach/real_demos.hdf5 --out data/reach/merged/merged.hdf5
-
-    # Keep all obs keys (zero-pad missing ones instead of taking intersection)
-    python merge_demos.py --inputs ... --out ... --keep-all
-
 """
 
 import argparse
@@ -32,7 +25,7 @@ def align_obs(src_group, target_keys: set):
     """
     Read obs from src_group and return a dict with exactly target_keys.
     Keys present in src but not in target are dropped.
-    Keys in target but not in src are skipped (caller handles zero-padding).
+    Keys in target but not in src are skipped.
     """
     obs      = src_group["obs"]
     src_keys = set(obs.keys())
@@ -43,7 +36,7 @@ def align_obs(src_group, target_keys: set):
         if key in src_keys:
             result[key] = obs[key][:]
         else:
-            warnings.append(f"  WARN: '{key}' missing in this demo - will be zero-padded")
+            warnings.append(f"WARN:'{key}' missing in this demo - will be zero-padded")
 
     extra = src_keys - target_keys
     if extra:
@@ -63,7 +56,7 @@ def iter_demos(f):
 def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
               target_keys: set, key_shapes: dict):
     """Write one demo into dst_data as demo_{new_index}."""
-    T   = src_group["actions"].shape[0]
+    T = src_group["actions"].shape[0]
     grp = dst_data.create_group(f"demo_{new_index}")
     grp.attrs["num_samples"] = T
 
@@ -87,11 +80,11 @@ def copy_demo(src_group, dst_data, new_index: int, obs_dict: dict,
 
 # Main
 def merge(input_paths: list[Path], out_path: Path,
-          val_ratio: float, keep_all: bool, seed: int):
+          val_ratio: float, seed: int):
 
-    print(f"  Merging {len(input_paths)} file(s) → {out_path}")
+    print(f"Merging {len(input_paths)} file(s) to {out_path}")
     for p in input_paths:
-        print(f"    {p}")
+        print(f"{p}")
 
     # Open all files and load demos
     open_files = [h5py.File(p, "r") for p in input_paths]
@@ -99,29 +92,26 @@ def merge(input_paths: list[Path], out_path: Path,
         all_demo_lists = [list(iter_demos(f)) for f in open_files]
 
         for i, (path, demos) in enumerate(zip(input_paths, all_demo_lists)):
-            print(f"\n  [{i+1}] {path.name}: {len(demos)} demos")
+            print(f"\n[{i+1}] {path.name}: {len(demos)} demos")
 
         # Determine target obs keys
         all_key_sets = [get_obs_keys(demos[0][1]) for demos in all_demo_lists if demos]
         if not all_key_sets:
-            print("  ERROR: No demos found in any file.")
+            print("ERROR: No demos found in any file.")
             return
 
-        if keep_all:
-            target_keys = set.union(*all_key_sets)
-        else:
-            target_keys = set.intersection(*all_key_sets)
+        target_keys = set.intersection(*all_key_sets)
 
         print(f"\n  Obs keys kept : {sorted(target_keys)}")
         for i, (ks, path) in enumerate(zip(all_key_sets, input_paths)):
             dropped = ks - target_keys
             if dropped:
-                print(f"  Dropping from {path.name}: {sorted(dropped)}")
+                print(f"Dropping from {path.name}: {sorted(dropped)}")
 
         core = {"robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos"}
         missing_core = core - target_keys
         if missing_core:
-            print(f"\n  WARN: core robot keys missing: {missing_core}")
+            print(f"\nWARN: core robot keys missing: {missing_core}")
 
 
         # Record shapes of each key (for zero-padding when a key is absent)
@@ -202,19 +192,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Merge robomimic HDF5 demo files for training."
     )
-    # New multi-file interface
+    # Multi-file interface
     parser.add_argument("--inputs", nargs="+",
                         help="Two or more HDF5 files to merge")
-    # Legacy two-file interface
-    parser.add_argument("--sim",  help="(legacy) Path to simulation demos")
-    parser.add_argument("--real", help="(legacy) Path to real-robot demos")
-
     parser.add_argument("--out", required=True,
                         help="Output path for merged file")
     parser.add_argument("--val-ratio", type=float, default=0.1,
                         help="Fraction of demos for validation (default 0.1)")
-    parser.add_argument("--keep-all", action="store_true",
-                        help="Keep all obs keys, zero-padding missing ones")
     parser.add_argument("--seed", type=int, default=1,
                         help="Random seed for train/val shuffle")
     args = parser.parse_args()
@@ -225,7 +209,7 @@ def main():
     elif args.sim and args.real:
         input_paths = [Path(args.sim), Path(args.real)]
     else:
-        parser.error("Provide either --inputs (one or more files) or both --sim and --real.")
+        parser.error("Provide either --inputs (one or more files).")
 
     for p in input_paths:
         if not p.exists():
@@ -235,7 +219,6 @@ def main():
         input_paths = input_paths,
         out_path    = Path(args.out),
         val_ratio   = args.val_ratio,
-        keep_all    = args.keep_all,
         seed        = args.seed,
     )
 

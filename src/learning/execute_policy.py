@@ -88,12 +88,12 @@ def main():
     policy.start_episode()
     print("Policy loaded")
 
-    # Print obs keys the checkpoint was trained on — helps diagnose mismatches
+    # Print obs keys the checkpoint was trained on - helps diagnose mismatches
     obs_norm = ckpt_dict.get("obs_normalization_stats", {})
     if obs_norm:
         print("\nCheckpoint obs keys (trained on):", list(obs_norm.keys()))
     else:
-        print("\n[WARNING] No obs_normalization_stats in checkpoint — cannot verify obs keys.")
+        print("\n[WARNING] No obs_normalization_stats in checkpoint - cannot verify obs keys.")
 
     # Connect
     print(f"\nConnecting to Franka at {ROBOT_IP}")
@@ -133,11 +133,9 @@ def main():
                 # Safety check — abort if action is unreasonably large
                 if np.any(np.abs(raw_action[:3]) > MAX_DELTA_POS):
                     print(f"\n[SAFETY ABORT] delta_pos too large: {raw_action[:3].round(4)}")
-                    print("Policy is outputting garbage actions — check demo data and re-train.")
                     break
                 if np.any(np.abs(raw_action[3:6]) > MAX_DELTA_ROT):
                     print(f"\n[SAFETY ABORT] delta_rot too large: {raw_action[3:6].round(4)}")
-                    print("Policy is outputting garbage actions — check demo data and re-train.")
                     break
 
                 # Integrate delta to absolute target

@@ -544,7 +544,7 @@ def main():
                         st.rerun()
 
                 if st.session_state.recording:
-                    st.error("🔴 Recording in progress...")
+                    st.error("🔴 Recording in progress.")
 
             else:
                 # Simulation recording
@@ -612,7 +612,7 @@ def main():
 
                     st.divider()
 
-                    # Process & Merge (combined)
+                    # Process & Merge
                     st.subheader("Process & Merge Demos")
 
                     latest_demo = find_latest_demo(task_name)
