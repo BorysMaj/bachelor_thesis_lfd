@@ -5,6 +5,7 @@ Run with: streamlit run ui.py
 
 import streamlit as st
 import subprocess
+import sys
 import threading
 import queue
 import time
@@ -253,15 +254,14 @@ def launch_sim_collection(task_name: str, env_name: str):
     Returns the Popen object for the terminal.
     """
     output_dir = str((DEMOS_DIR / task_name).resolve())
+    python = sys.executable
     cmd_inner = (
         f"cd {Path(__file__).parent.resolve()} && "
-        f"sudo /home/borys/miniconda3/envs/franka/bin/python -m robosuite.scripts.collect_human_demonstrations "
+        f"{python} -m robosuite.scripts.collect_human_demonstrations "
         f"--environment {env_name} "
         f"--robots Panda "
         f"--device spacemouse "
         f"--directory {output_dir}; "
-        f"echo ''; echo 'Fixing file ownership...'; "
-        f"sudo chown -R $USER:$USER {output_dir}; "
         f"echo 'Collection done - press Enter to close'; read"
     )
     # Try gnome-terminal first, fall back to xterm
@@ -280,7 +280,7 @@ def launch_sim_collection(task_name: str, env_name: str):
 
 def process_sim_demos(demo_path: Path):
     """
-    Run dataset_states_to_obs then split_train_val in a new gnome-terminal window.
+    Run dataset_states_to_obs then split_train_val in a new terminal window.
     Both commands run sequentially in one terminal so the user can watch progress.
     """
     obs_path = demo_path.parent / "obs.hdf5"
@@ -658,13 +658,17 @@ def main():
                             "--ratio", "0.1",
                         ])
 
-                        # Step 2: merge all obs files + existing merged if present
-                        sources = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
+                        # Step 2: merge new obs files into existing merged 
+                        if merged_path.exists():
+                            merged_mtime = merged_path.stat().st_mtime
+                            sources = [p for p in find_all_hdf5(task_name)
+                                       if p.name == "obs.hdf5" and p.stat().st_mtime > merged_mtime]
+                            sources.append(merged_path)
+                        else:
+                            sources = [p for p in find_all_hdf5(task_name) if p.name == "obs.hdf5"]
                         # include the just-processed file even if not on disk yet
                         if obs_path not in sources:
                             sources.append(obs_path)
-                        if merged_path.exists():
-                            sources.append(merged_path)
                         src_args = " ".join(f'"{str(s)}"' for s in sources)
                         cmd3 = f"python {merge_script} --inputs {src_args} --out \"{str(merged_path)}\""
 
@@ -1088,8 +1092,7 @@ def main():
                                     )
                                     cmd_str  = f"python -m robomimic.scripts.train --config {config_path}"
                                     bash_cmd = (
-                                        f"{cmd_str} && echo '--- Training complete! ---' || "
-                                        f"echo '--- Training FAILED. ---'; "
+                                        f"{cmd_str} && "
                                         f"echo 'Press Enter to close...'; read"
                                     )
                                     subprocess.Popen(
