@@ -6,12 +6,14 @@ venv/
 env/
 .env
 
-# Data (not user study data)
+# Data
 config/
 data/
 *.pth
 *.json
-!user_study_data/**/*.hdf5
+user_study_data/
+mixed_datasets/
+user_study_results/User_study_form_data.csv
 
 # Jupyter
 .ipynb_checkpoints/
